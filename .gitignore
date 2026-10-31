@@ -1,0 +1,14 @@
+/build/
+/dist/
+/toolchain/
+/deps/
+/scratch/
+__pycache__/
+*.dll
+*.exe
+*.lib
+*.log
+*.zip
+*.bin
+*.imp
+*.gob

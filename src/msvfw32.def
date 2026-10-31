@@ -1,0 +1,3 @@
+LIBRARY msvfw32
+EXPORTS
+MCIWndCreateA
