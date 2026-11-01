@@ -13,10 +13,11 @@ The music builds are experimental. An intermittent music-loss/crash problem seen
 development is not proven fixed, and updating the codecs is not being presented as a
 confirmed solution. Reports with reproducible steps would help narrow it down.
 
-The source, build instructions, CI artifacts and installation/removal instructions
-will be linked here after the repository and a reviewed preview release are available.
+The [source and installation instructions](https://github.com/warthurton/imperialism-compat)
+and [Windows CI artifacts](https://github.com/warthurton/imperialism-compat/actions/workflows/build.yml)
+are available now. Native smoke tests passed, and both music alternatives completed
+a short in-game turn test with the display shim. This is limited acceptance coverage.
 No game executable, artwork or music is distributed. Back up the original DLLs before
 trying it, and restore those backups to remove it.
 
-<!-- Draft only. Replace this paragraph with verified repo/release URLs and actual test
-     coverage before posting. No forum post has been sent. -->
+<!-- Draft only. Add a reviewed preview-release URL before posting. No forum post has been sent. -->

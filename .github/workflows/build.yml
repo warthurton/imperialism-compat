@@ -29,7 +29,7 @@ jobs:
       - name: Check music ABI and generated-tone metadata
         run: python -I tools/test_music.py
       - name: Package and verify release contents
-        run: python -I tools/package.py
+        run: python -I tools/test_package.py
       - name: Display artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

@@ -79,7 +79,7 @@ python -I build.py
 python -I tools/test_display.py
 python -I tools/build_music.py
 python -I tools/test_music.py
-python -I tools/package.py
+python -I tools/test_package.py
 ```
 
 For a local ABI and native check using the installed GOG codecs:
@@ -109,6 +109,9 @@ Set `VERSION`, commit, then push a matching `vVERSION` tag to build an **unpubli
 prerelease draft**. Review its packages and test evidence before publishing it.
 Normal CI never creates a release. Each ZIP has a manifest; `SHA256SUMS.txt` covers
 the ZIPs. Music ZIPs include complete corresponding source and build scripts.
+Packaging rejects stale test reports and changed music build inputs, and verifies
+extracted codec files against the pinned source archives. `tools/test_package.py`
+also checks these rejection paths while restoring each temporary change.
 
 ## License and provenance
 

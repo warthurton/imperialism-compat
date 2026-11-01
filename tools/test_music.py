@@ -1,5 +1,6 @@
 # Usage: python -I tools/test_music.py [--game-directory PATH] [--compiler PATH]
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -27,6 +28,8 @@ def test(compiler, game_directory=None):
     for variant in ('current-codecs', 'gog-codecs'):
         dll = ROOT / 'build/music' / variant / 'winmm.dll'
         records[variant] = inspect_dll(dll, ['mciSendStringA', 'mciSendCommandA', 'waveOutOpen'])
+        tested_hash = hashlib.sha256(dll.read_bytes()).hexdigest()
+        records[variant]['dll_sha256'] = tested_hash
         if variant == 'gog-codecs' and not game_directory:
             records[variant]['native_smoke'] = 'not run: installed game codec DLLs required locally'
             continue
@@ -42,6 +45,8 @@ def test(compiler, game_directory=None):
             subprocess.run([str(host), str(target), str(location / 'Music/Track02.ogg')],
                            cwd=location, timeout=20, check=True)
             records[variant]['native_smoke'] = 'passed'
+        if hashlib.sha256(dll.read_bytes()).hexdigest() != tested_hash:
+            raise ValueError('Music DLL changed during testing: ' + variant)
     for record in records.values():
         record['export_count'] = len(record.pop('exports'))
     report = {'status': 'ok', 'result': records, 'errors': [],
