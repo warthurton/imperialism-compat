@@ -19,7 +19,10 @@ jobs:
         with:
           persist-credentials: false
       - name: Fetch pinned sources and toolchain
+        # Downloads retry transient connection/HTTP failures; checksum errors fail immediately.
         run: python -I tools/fetch_deps.py --toolchain
+      - name: Check download failure handling
+        run: python -I tools/test_fetch.py
       - name: Build display shim
         run: python -I build.py
       - name: Check display ABI and native behavior

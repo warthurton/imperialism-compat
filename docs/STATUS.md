@@ -19,6 +19,9 @@
   including extracted codec trees against their pinned source archives.
   The follow-up passed Windows CI, including all five rejection checks:
   https://github.com/warthurton/imperialism-compat/actions/runs/41267009413.
+- A later documentation-only CI run hit a TLS EOF fetching libogg. Downloads now
+  retry transient connection failures up to three times; checksum errors still fail
+  immediately. Four offline checks cover recovery, retry limits, 404 and checksum failures.
 - Local game acceptance passed with the display shim and each music variant: load
   `oil_plant_built`, capture before/idle/after and complete game turn 5 -> 6.
   Both variants passed all ten snapshot checks. The acceptance harness restored

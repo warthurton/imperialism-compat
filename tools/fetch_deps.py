@@ -1,16 +1,47 @@
 # Usage: python -I tools/fetch_deps.py [--toolchain]
 import argparse
 import hashlib
+import http.client
 import json
 from pathlib import Path
 import subprocess
+import ssl
 import tarfile
 import time
 import urllib.request
+import urllib.error
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 PINS = json.loads((ROOT / 'dependencies.json').read_text())
+
+
+def download(url, archive, expected_hash):
+    partial = archive.with_suffix(archive.suffix + '.part')
+    started = time.monotonic()
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response, partial.open('wb') as output:
+                downloaded = 0
+                while chunk := response.read(1024 * 1024):
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    if downloaded % (16 * 1024 * 1024) == 0:
+                        print('%s: %.1f MiB' % (archive.name, downloaded / 1048576), flush=True)
+                    if time.monotonic() - started > 300:
+                        raise TimeoutError('Download exceeded five minutes: ' + archive.name)
+            if hashlib.sha256(partial.read_bytes()).hexdigest() != expected_hash:
+                raise ValueError('Downloaded archive checksum mismatch: ' + archive.name)
+            partial.replace(archive)
+            return
+        except (urllib.error.URLError, TimeoutError, ConnectionError, ssl.SSLError,
+                http.client.HTTPException) as error:
+            if isinstance(error, urllib.error.HTTPError) and error.code not in (408, 429, 500, 502, 503, 504):
+                raise
+            if attempt == 2 or time.monotonic() - started > 300:
+                raise
+            print('Download connection failed; retry %d/3: %s' % (attempt + 2, archive.name), flush=True)
+            time.sleep(2 ** (attempt + 1))
 
 
 def fetch_archive(name):
@@ -20,17 +51,7 @@ def fetch_archive(name):
     archive = destination / pin['url'].rsplit('/', 1)[-1]
     if not archive.exists():
         print('Downloading ' + name, flush=True)
-        started = time.monotonic()
-        partial = archive.with_suffix(archive.suffix + '.part')
-        with urllib.request.urlopen(pin['url'], timeout=30) as response, partial.open('wb') as output:
-            downloaded = 0
-            while chunk := response.read(1024 * 1024):
-                output.write(chunk)
-                downloaded += len(chunk)
-                print('%s: %.1f MiB' % (name, downloaded / 1048576), flush=True)
-                if time.monotonic() - started > 300:
-                    raise TimeoutError('Download exceeded five minutes: ' + name)
-        partial.replace(archive)
+        download(pin['url'], archive, pin['sha256'])
     if hashlib.sha256(archive.read_bytes()).hexdigest() != pin['sha256']:
         raise ValueError('Checksum mismatch; remove the failed archive before retrying: ' + str(archive))
     extracted = destination / pin['directory']
