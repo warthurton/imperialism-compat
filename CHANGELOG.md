@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Clarify music evidence: sustained-play improvement was observed with newer upstream
+  ogg-winmm using GOG codecs; newer-codec builds have only brief smoke-test coverage.
+
 - Split the display shim into eight focused C modules with private state and explicit contracts.
 - Explain Windows concepts inline and in a beginner walkthrough; replace hidden original-call casts
   with named types and enforce 100-column C/header formatting in CI.

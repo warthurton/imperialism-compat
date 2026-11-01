@@ -1,5 +1,19 @@
 # Imperialism Compat preview
 
+## Music evidence and attribution
+
+The observed improvement came after replacing GOG's bundled music wrapper with
+the newer wrapper from the upstream open-source ogg-winmm project. The maintainer
+has played with music continuing to work using that rebuilt wrapper **linked
+against GOG's existing codec DLLs**. This supports the wrapper update as the
+source of the improvement; it does not establish that every music/crash case is fixed.
+
+The alternative build using newer Ogg/Vorbis libraries has only had brief smoke
+tests, lasting a few seconds. It has not had enough sustained playback testing
+to assess music stability or to attribute any improvement to the newer libraries.
+The two builds must not be presented as equally validated for sustained play.
+
+
 Two optional components for Imperialism (1997):
 
 - **Display:** scaled resizable window, borderless fullscreen, input mapping and preserved desktop resolution.
