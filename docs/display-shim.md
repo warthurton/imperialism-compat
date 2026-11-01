@@ -450,4 +450,3 @@ rendering separate from the game image and preserve a solid-color failure path.
 Any new HWND procedure, worker or decoder resource needs an explicit ownership
 and failure plan; the existing process-lifetime behavior is not a reusable
 unload protocol.
-
