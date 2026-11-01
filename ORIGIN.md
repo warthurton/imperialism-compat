@@ -5,6 +5,11 @@ The display shim was extracted from Wayne Arthurton's MIT-licensed
 [`7135f469a41b2f35b341a44b5a10a0e16f1b6a1d`](https://github.com/warthurton/imperialism-re/commit/7135f469a41b2f35b341a44b5a10a0e16f1b6a1d).
 The original development history remains there; this repository starts with a focused import.
 
+The extraction was intentional: runtime compatibility code, music-wrapper builds,
+CI and installable releases have a different audience and lifecycle from the
+decompilation, state inspection and portable-core work in RE. The RE repository
+now consumes a pinned Compat revision through its `compat/` Git submodule.
+
 | Original path | Imported path | Original SHA-256 (working-tree bytes) |
 |---|---|---|
 | `shim/shim.c` | `src/shim.c` | `d45ec0e975cc7577907749ed8b824495d8e06057f5693cf25a4557304244dff5` |

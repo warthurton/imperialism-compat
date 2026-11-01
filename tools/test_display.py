@@ -13,9 +13,11 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build import find_compiler
 from pe import inspect_dll
+from test_backdrop import test as test_backdrop
 
 
 def test(compiler):
+    backdrop_report = test_backdrop(compiler)
     dll = ROOT / 'build/msvfw32.dll'
     tested_hash = hashlib.sha256(dll.read_bytes()).hexdigest()
     information = inspect_dll(dll, ['MCIWndCreateA'])
@@ -39,10 +41,18 @@ def test(compiler):
                 raise ValueError('Text-log setting was not honored')
             if enabled and 'shim smoke' not in text.read_text():
                 raise ValueError('TextOutA capture missing')
+    with tempfile.TemporaryDirectory(prefix='blocked log space ', dir=ROOT / 'build') as directory:
+        location = Path(directory)
+        target = location / dll.name
+        shutil.copyfile(dll, target)
+        # A directory at the log filename makes fopen fail without changing ACLs.
+        (location / 'imperialism_gdi_log.txt').mkdir()
+        subprocess.run([str(host), str(target), '--wait-summary'], cwd=location, check=True, timeout=15)
     if hashlib.sha256(dll.read_bytes()).hexdigest() != tested_hash:
         raise ValueError('Display DLL changed during testing')
     report = {'status': 'ok', 'result': {'abi': information, 'smoke_cases': 2,
-              'dll_sha256': tested_hash}, 'errors': [], 'warnings': []}
+              'dll_sha256': tested_hash, 'backdrop': backdrop_report['result'],
+              'unwritable_log_path': 'passed'}, 'errors': [], 'warnings': []}
     (ROOT / 'build/display-test-report.json').write_text(json.dumps(report, indent=2) + '\n')
     return report
 

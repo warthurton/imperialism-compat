@@ -4,6 +4,12 @@ Display and music compatibility shims for **Imperialism (1997)** on Windows.
 An unofficial fan project by Wayne Arthurton. You need your own copy of the game;
 these downloads contain no game executable, artwork, music or saves.
 
+Compat was deliberately extracted from
+[Imperialism RE](https://github.com/warthurton/imperialism-re) to separate two jobs:
+this repository maintains runtime display/music compatibility and releases; RE
+studies the original executable and develops the portable game-logic reimplementation.
+RE references a specific Compat revision through its `compat/` Git submodule.
+
 This is a **preview**. The display implementation was developed against the GOG
 Windows release. The music wrapper builds successfully, but the intermittent
 music-loss/crash problem observed during development is **not proven fixed**.
@@ -53,10 +59,17 @@ been qualified for XP, Wine, macOS or every Windows release.
 resolution, use integer scaling in fullscreen where possible, and tint the title
 bar on supported Windows 11 builds. Text logging is off by default.
 
+The unused border area tiles the running game's original faint crown/shield/swords
+backdrop at its native size. The shim reads bitmap 281 from `Imperialism.exe`; no
+game artwork is included in the download. If that bitmap is missing, unsupported
+or cannot load, the border stays plain brown. Set `[display] original_backdrop=0`
+to always use plain brown. See [Backdrop implementation and evidence](docs/backdrop.md).
+
 `imperialism_gdi_log.txt` is written beside the DLL. If `[text_log] enabled=1`,
 `imperialism_text.log` also records strings drawn by the game. Logs are diagnostic
 files, not required install assets; review them before attaching them to an issue.
 The game directory must be writable for the current diagnostic implementation.
+If the diagnostic log cannot be opened, the shim continues without that log.
 
 ## Music settings
 
@@ -67,6 +80,9 @@ Tracks use names such as `Track02.ogg`; preserve the game's track names and orde
 
 ## Build and check
 
+For the display code walkthrough, state and coordinate-system reference, and
+per-function guide, read [Display shim internals](docs/display-shim.md).
+
 Requires Windows, Python 3.12+, Git and the 32-bit target compiler from
 [llvm-mingw](https://github.com/mstorsjo/llvm-mingw). Dependencies are pinned in
 [`dependencies.json`](dependencies.json); source/archive downloads are checked
@@ -75,6 +91,7 @@ set `LLVM_MINGW` to that directory, or let the scripts find the pinned local too
 
 ```powershell
 python -I tools/fetch_deps.py --toolchain
+python -I tools/test_release.py
 python -I build.py
 python -I tools/test_display.py
 python -I tools/build_music.py
@@ -105,9 +122,12 @@ variant and checks its linkage; its native test with those original DLLs is loca
 The generated-tone tests do not assert audible playback, rapid playback transitions,
 or in-game stability. See [`docs/STATUS.md`](docs/STATUS.md) for actual validation.
 
-Set `VERSION`, commit, then push a matching `vVERSION` tag to build an **unpublished
-prerelease draft**. Review its packages and test evidence before publishing it.
-Normal CI never creates a release. Each ZIP has a manifest; `SHA256SUMS.txt` covers
+Set `VERSION`, review/merge the change, then push a matching `vVERSION` tag. After
+the build and checks pass, CI uploads all packages and **publishes a GitHub Release**.
+Versions such as `0.1.0-preview.1` publish as prereleases; plain versions publish as
+stable releases. A temporary draft keeps incomplete uploads private. Rerunning a
+published tag preserves its existing assets. Branch/PR CI uploads artifacts without
+creating a release. Each ZIP has a manifest; `SHA256SUMS.txt` covers
 the ZIPs. Music ZIPs include complete corresponding source and build scripts.
 Packaging rejects stale test reports and changed music build inputs, and verifies
 extracted codec files against the pinned source archives. `tools/test_package.py`
