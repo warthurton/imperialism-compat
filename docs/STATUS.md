@@ -14,13 +14,17 @@
   open/status/length/close/process-exit tests. The GOG variant used the installed
   game's codec DLLs in a temporary local test directory.
 - CI workflow and source-inclusive packages prepared; hosted CI not yet run.
+- Local game acceptance passed with the display shim and each music variant: load
+  `oil_plant_built`, capture before/idle/after and complete game turn 5 -> 6.
+  Both variants passed all ten snapshot checks. The acceptance harness restored
+  the original DLLs/INI files (hash checked), stopped the game and restored settings.
+  This checks a short game session, not long-term music stability or every display control.
 
 ## Limits and next checks
 
 - The intermittent music-loss/crash issue remains unresolved.
 - No rapid play/stop, EOF/drain, injected failure or hot-unload tests yet.
 - Smoke tests do not verify audible output or actual game transitions.
-- Run local game acceptance with each variant and restored original DLLs/settings.
 - Run hosted CI after creating/pushing the standalone repository; review draft release
   and forum text before publishing.
 
