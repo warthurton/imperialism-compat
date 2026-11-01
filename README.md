@@ -14,8 +14,8 @@ studies the original executable and develops the portable game-logic reimplement
 RE references a specific Compat revision through its `compat/` Git submodule.
 
 This is a **preview**. The display implementation was developed against the GOG
-Windows release. The music wrapper builds successfully, but the intermittent
-music-loss/crash problem observed during development is **not proven fixed**.
+Windows release. The music-loss/crash problem **appears fixed in observed use**, but
+it has **not been proven fixed in every case**. Please report reproducible failures.
 
 ## Components and downloads
 
@@ -52,11 +52,46 @@ when you run the game on 64-bit Windows.
 The builds target modern Windows with UCRT and desktop composition; they have not
 been qualified for XP, Wine, macOS or every Windows release.
 
+## What the display shim changes
+
+- Shows the original game view in a resizable, maximizable window, keeping its aspect ratio.
+- Offers borderless fullscreen without changing desktop resolution by default.
+- Maps mouse positions, button events, cursor shapes and dragging back into the
+  original game windows, including child-dialog title bars and close buttons.
+- Keeps the original game frame underneath the displayed copy. Suppresses the game's
+  own minimize/maximize/resize requests that would expose or disrupt that arrangement;
+  minimizing the displayed window still minimizes the original frame for taskbar restore.
+- Passes menu commands and keyboard focus back to the game, so its existing handlers run.
+- Tiles the original heraldic backdrop in unused space, falling back to plain brown.
+- Optionally tints the title bar on supported Windows 11 versions.
+- Writes diagnostic API/geometry summaries and optionally records drawn text.
+- Forwards the game's video-window export to the genuine Windows MSVFW32 library.
+
+The displayed copy uses Windows desktop composition. Scaling enlarges the existing
+picture; it does not add map viewport space or higher-resolution game artwork.
+The display component does not change simulation rules or save formats. Music is
+provided by the separate, optional `winmm.dll` component described below.
+
 ## Display controls and settings
 
 - Resize or maximize the mirror window normally.
 - Press **F11** or **Alt+Enter** to toggle borderless fullscreen.
 - The original view is scaled; this does not create a larger in-game map viewport.
+
+All display options live in `imperialism_shim.ini` beside the DLL. Values are
+read at startup; restart the game after editing. Use `1` for on and `0` for off.
+
+| Section / key | Default | Effect when on; effect when off |
+|---|---|---|
+| `[display] block_mode_change` | `1` | Preserve desktop resolution; `0` allows the game's normal display-mode requests through. |
+| `[display] fullscreen_integer_scale` | `1` | Use whole-number fullscreen magnification when at least 1× fits; `0` uses fractional aspect-preserving scaling to fill more space. |
+| `[display] brown_titlebar` | `1` | Request brown title/border colors and light caption text on supported Windows 11; `0` keeps normal system styling. Older Windows versions may ignore the tint. |
+| `[display] original_backdrop` | `1` | Tile the game's stock bitmap when available; `0` always uses plain brown. Missing/unsupported artwork also uses brown. |
+| `[text_log] enabled` | `0` | `1` records strings the game asks Windows to draw; `0` leaves text capture off. |
+
+Resizing, input translation and F11/Alt+Enter are always enabled; there are no
+separate INI toggles for them. Integer scaling affects fullscreen, not normal resizing.
+Diagnostic API/geometry logging has no INI switch in the current implementation.
 
 `imperialism_shim.ini` documents all supported settings. Defaults preserve desktop
 resolution, use integer scaling in fullscreen where possible, and tint the title
@@ -81,60 +116,59 @@ commands using existing Ogg tracks. `winmm.ini` defaults to `CDDAPath=Music`, wi
 `CDDAVolume`, `MIDIVolume` and `WAVEVolume` set to 100. Settings are read at startup.
 Tracks use names such as `Track02.ogg`; preserve the game's track names and ordering.
 
-## Build and check
+These options belong to the `[OGG-WinMM]` section of `winmm.ini`:
 
-For the display code walkthrough, state and coordinate-system reference, and
-per-function guide, read [Display shim internals](docs/display-shim.md).
+| Key | Shipped value | Meaning |
+|---|---|---|
+| `CDDAPath` | `Music` | Directory containing the Ogg CD-audio tracks. |
+| `CDDAVolume` | `100` | CD-audio/music volume percentage, 0–100. |
+| `MIDIVolume` | `100` | MIDI volume percentage, 0–100. |
+| `WAVEVolume` | `100` | Requested wave-audio volume percentage, 0–100. |
 
-Requires Windows, Python 3.12+, Git and the 32-bit target compiler from
-[llvm-mingw](https://github.com/mstorsjo/llvm-mingw). Dependencies are pinned in
-[`dependencies.json`](dependencies.json); source/archive downloads are checked
-against SHA-256 or an exact Git commit. Add the compiler's `bin` directory to PATH,
-set `LLVM_MINGW` to that directory, or let the scripts find the pinned local toolchain.
+Wave/MIDI volume requests depend on Windows and device support; upstream avoids
+some setters on modern Windows to prevent changing master volume. Both music
+builds expose the same settings and install as `winmm.dll`; choose one.
+The rebuilt wrapper appears to resolve the observed music-loss/crash problem,
+but all playback transitions, systems and long-running cases have not been proven.
+The codec update alone has not been established as the cause of the improvement.
 
-```powershell
-python -I tools/fetch_deps.py --toolchain
-python -I tools/test_release.py
-python -I build.py
-python -I tools/test_display.py
-python -I tools/build_music.py
-python -I tools/test_music.py
-python -I tools/test_package.py
-```
 
-For a local ABI and native check using the installed GOG codecs:
+## Readability and source layout
 
-```powershell
-python -I tools/build_music.py --game-codec "C:\GOG Games\Imperialism\libvorbisfile-3.dll"
-python -I tools/test_music.py --game-directory "C:\GOG Games\Imperialism"
-```
+The shim is designed for readability wherever that preserves correctness and
+sound engineering practice. A reader should be able to understand the design
+without already knowing MFC or the details of Win32. The game uses MFC; the shim
+does not link MFC or require its class hierarchy.
 
-Builds go to `build/` and packages to `dist/`; scripts do not install into the game.
-The codec source lists follow upstream's fixed MinGW targets, compiled with
-llvm-mingw and archived with `llvm-ar`. No upstream prebuilt codec libraries are linked.
+Comments explain Windows concepts at the point they matter, the reason for each
+interception, coordinate spaces and ownership. Descriptive names, short functions
+and focused C modules keep those explanations close to the code. Readability must
+preserve API calling conventions, thread ownership, resource lifetimes and runtime
+cost; it is not a reason to replace the game's working behavior with abstractions.
 
-## CI and releases
+| File | Start here when studying… |
+|---|---|
+| `src/shim.c` | How Windows loads the proxy, reads settings and forwards the video export |
+| `src/display.c` | How the original game window and its larger live preview are managed |
+| `src/input.c` | How a click on the preview reaches the correct original child window |
+| `src/graphics.c` | How drawing calls are observed without changing their results |
+| `src/text_log.c` | How drawing requests become an optional readable text trace |
+| `src/hooks.c` | How executable import slots are redirected and original addresses retained |
+| `src/diagnostics.c` | How synchronized logs and periodic summaries are written |
+| `src/backdrop.c` | How optional stock artwork is loaded, tiled and released |
+| `src/shim_internal.h` | The small private contracts between these modules |
+| `src/hook_support.h` | The two declaration/logging macros used by API wrappers |
 
-GitHub Actions builds on Windows for pushes, pull requests and manual runs. It checks
-i386 DLLs and exports, codec dependencies, native display interception/text logging,
-generated-tone decoding and music metadata, and package hashes/contents. It uploads
-two artifact groups: **display** and **music** (both music variants).
+C source and headers target a maximum of **100 columns**. Split long signatures,
+calls and conditions; keep one statement per line. `.clang-format` records the
+format, and CI checks it with `python -I tools/check_style.py`. Use `--fix` to apply
+the same format locally. The beginner walkthrough includes a glossary and a worked
+click-coordinate example in [Display shim internals](docs/display-shim.md).
 
-Hosted CI does not receive the game or GOG's codec DLLs. It compiles the GOG-codec
-variant and checks its linkage; its native test with those original DLLs is local only.
-The generated-tone tests do not assert audible playback, rapid playback transitions,
-or in-game stability. See [`docs/STATUS.md`](docs/STATUS.md) for actual validation.
+## Development
 
-Set `VERSION`, review/merge the change, then push a matching `vVERSION` tag. After
-the build and checks pass, CI uploads all packages and **publishes a GitHub Release**.
-Versions such as `0.1.0-preview.1` publish as prereleases; plain versions publish as
-stable releases. A temporary draft keeps incomplete uploads private. Rerunning a
-published tag preserves its existing assets. Branch/PR CI uploads artifacts without
-creating a release. Each ZIP has a manifest; `SHA256SUMS.txt` covers
-the ZIPs. Music ZIPs include complete corresponding source and build scripts.
-Packaging rejects stale test reports and changed music build inputs, and verifies
-extracted codec files against the pinned source archives. `tools/test_package.py`
-also checks these rejection paths while restoring each temporary change.
+See [Building, testing, CI and releases](docs/development.md) for toolchain setup,
+local checks, CI coverage and publishing.
 
 ## License and provenance
 

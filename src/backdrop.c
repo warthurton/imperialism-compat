@@ -7,8 +7,10 @@
  * safe after any partial load failure and before loading a replacement resource. */
 void backdrop_free(Backdrop *backdrop)
 {
-    if (backdrop->pattern) DeleteObject(backdrop->pattern);
-    if (backdrop->bitmap) DeleteObject(backdrop->bitmap);
+    if (backdrop->pattern)
+        DeleteObject(backdrop->pattern);
+    if (backdrop->bitmap)
+        DeleteObject(backdrop->bitmap);
     memset(backdrop, 0, sizeof *backdrop);
 }
 
@@ -26,27 +28,37 @@ BOOL backdrop_load(Backdrop *backdrop, HMODULE resourceModule)
     DWORD resourceSize, requiredSize;
 
     backdrop_free(backdrop);
-    if (!resourceModule) return FALSE;
-    resource = FindResourceW(resourceModule, MAKEINTRESOURCEW(BACKDROP_RESOURCE_ID), MAKEINTRESOURCEW(2));
-    if (!resource) return FALSE;
+    if (!resourceModule)
+        return FALSE;
+    resource =
+        FindResourceW(resourceModule, MAKEINTRESOURCEW(BACKDROP_RESOURCE_ID), MAKEINTRESOURCEW(2));
+    if (!resource)
+        return FALSE;
     resourceSize = SizeofResource(resourceModule, resource);
-    if (resourceSize < sizeof header) return FALSE;
+    if (resourceSize < sizeof header)
+        return FALSE;
     resourceData = LoadResource(resourceModule, resource);
     bytes = resourceData ? LockResource(resourceData) : NULL;
-    if (!bytes) return FALSE;
+    if (!bytes)
+        return FALSE;
     memcpy(&header, bytes, sizeof header);
     if (header.biSize != sizeof header || header.biWidth != BACKDROP_TILE_SIZE ||
-        header.biHeight != BACKDROP_TILE_SIZE || header.biPlanes != 1 ||
-        header.biBitCount != 8 || header.biCompression != BI_RGB ||
-        (header.biClrUsed != 0 && header.biClrUsed != 256))
+        header.biHeight != BACKDROP_TILE_SIZE || header.biPlanes != 1 || header.biBitCount != 8 ||
+        header.biCompression != BI_RGB || (header.biClrUsed != 0 && header.biClrUsed != 256))
         return FALSE;
     /* Width 128 needs no scanline padding; the stock DIB includes all 256 colors. */
     requiredSize = sizeof header + 256 * sizeof(RGBQUAD) + BACKDROP_TILE_SIZE * BACKDROP_TILE_SIZE;
-    if (resourceSize < requiredSize) return FALSE;
+    if (resourceSize < requiredSize)
+        return FALSE;
 
-    backdrop->bitmap = (HBITMAP)LoadImageW(resourceModule, MAKEINTRESOURCEW(BACKDROP_RESOURCE_ID),
-                                        IMAGE_BITMAP, 0, 0, LR_CREATEDIBSECTION);
-    if (!backdrop->bitmap) return FALSE;
+    backdrop->bitmap = (HBITMAP)LoadImageW(resourceModule,
+                                           MAKEINTRESOURCEW(BACKDROP_RESOURCE_ID),
+                                           IMAGE_BITMAP,
+                                           0,
+                                           0,
+                                           LR_CREATEDIBSECTION);
+    if (!backdrop->bitmap)
+        return FALSE;
     if (GetObjectW(backdrop->bitmap, sizeof bitmapInfo, &bitmapInfo) != sizeof bitmapInfo ||
         bitmapInfo.bmWidth != BACKDROP_TILE_SIZE || bitmapInfo.bmHeight != BACKDROP_TILE_SIZE) {
         backdrop_free(backdrop);

@@ -10,6 +10,12 @@ and marked as a prerelease. Existing music-stability and live-focus limits below
 
 ## Implemented
 
+- Unreleased readability refactor: eight focused C modules, no shared mutable window/input
+  globals, named original-call types, beginner-oriented comments and a glossary/walkthrough.
+  CI enforces the checked-in formatter and 100-column source/header limit. README documents
+  user-visible changes and all INI options; build/CI details moved to `docs/development.md`.
+  Existing focus-guard limits remain; no new live acceptance is claimed for this refactor.
+
 - Full display-shim developer guide in `docs/display-shim.md`; all original functions
   annotated and dense local/parameter names expanded without changing input/hook logic.
 - Stock backdrop identified as executable bitmap 281: a 128x128 crown/shield/swords
@@ -57,7 +63,7 @@ and marked as a prerelease. Existing music-stability and live-focus limits below
 
 ## Limits and next checks
 
-- The intermittent music-loss/crash issue remains unresolved.
+- The music-loss/crash issue appears fixed in observed use, but is not proven fixed in all cases.
 - No rapid play/stop, EOF/drain, injected failure or hot-unload tests yet.
 - Smoke tests do not verify audible output or actual game transitions.
 - Review forum text before posting. Version-tag CI publishes release packages

@@ -1,452 +1,542 @@
-# Display shim developer guide
+# How the display shim works
 
-This describes the display component in [src/shim.c](../src/shim.c). The separate
-WINMM music component has its own source and decoder dependencies. The display
-shim is a **32-bit, process-lifetime MSVFW32 proxy** developed against the GOG
-Windows build of Imperialism. Its main job is to present the original game view
-at a useful size while preserving the game's own rendering and event handlers.
+Start here if you know C but have not worked with Windows GUI programs.
+The aim is to explain the program's decisions and the Windows concepts behind
+them, so the source can be read without first learning MFC.
 
-The source now uses descriptive local and parameter names. That naming/comment
-cleanup preserves public entry points, calling conventions, hook order, calculations
-and existing input dispatch. The optional stock backdrop and missing-log guard are
-separate behavior changes described below.
-This guide explains the implementation and its limits; it is not a claim that every
-path has been exercised in the real game. Current test evidence is in
-[STATUS.md](STATUS.md).
+## What this program changes
 
-## Read the system in this order
+Imperialism draws its original, small game view into its own Windows windows.
+This shim leaves that drawing in place. It creates a second, larger window and
+asks Windows to show a scaled copy of the original inside it. It then translates
+mouse input from the larger window back into the game's original coordinates.
 
-1. [DllMain](../src/shim.c#L1038) and [patch_iat](../src/shim.c#L955): startup and the interception boundary.
-2. [w_CreateWindowExA](../src/shim.c#L678), [mirror_init](../src/shim.c#L459),
-   [mirror_show](../src/shim.c#L540) and [mirror_layout](../src/shim.c#L500): discover and present the game.
-3. [refresh_src](../src/shim.c#L106) and [mirror_update](../src/shim.c#L124): choose the crop and fitted image.
-4. [MirrorProc](../src/shim.c#L323), [mirror_mouse](../src/shim.c#L257), [map_point](../src/shim.c#L221) and
-   [resolve_target](../src/shim.c#L237): turn scaled-window input back into game input.
-5. The USER32 wrappers: make the game's cursor, capture and placement queries
-   agree with that input.
-6. Text/diagnostic logging and [MCIWndCreateA](../src/shim.c#L1082): observability and the
-   original DLL function that still has to work.
+There are therefore two views of the same game:
+
+- The **game frame** is the real window that the game already understands.
+- The **mirror** is the resizable presentation window that the player sees.
+
+This changes presentation, not game rules or map size. Enlarging the mirror does
+not reveal additional tiles or create higher-resolution game artwork.
+
+The display shim is C using the Windows SDK. **It does not use or link MFC.**
+Imperialism itself uses MFC and an Ambit framework, but the shim does not call
+their C++ classes. It deals with the Windows handles and messages beneath them.
+For example, `AmbitGameWindow` is a window-class name the shim searches for,
+not a C++ type it needs to include.
+
+The music replacement is a separate component. Nothing in this guide's display
+path decodes Ogg music or implements the WINMM music wrapper.
+
+## The Windows vocabulary used in the source
+
+| Term | Meaning here |
+|---|---|
+| DLL | A library loaded into the game's process. Its code runs inside that process. |
+| Proxy DLL | A replacement with the filename the game expects. It adds behavior and forwards the original function the game still needs. |
+| HWND | An opaque Windows handle identifying a window. It is not a pointer to an MFC object. Windows APIs use it to find the real object. |
+| HMODULE | A handle to an executable/DLL module already loaded into the process. |
+| Resource | A named or numbered data item stored inside an executable/DLL, such as a bitmap or icon. Reading a bitmap resource is not calling the game's code. |
+| Window class | A registered recipe for creating a kind of window: its message handler, default cursor, icon and similar properties. It is unrelated to a C++ `class`. |
+| Client area | The inside of a window where application content appears, excluding its title bar and resize border. |
+| Non-client area | The title bar, borders and other window decorations managed by Windows. |
+| Message | A numbered event such as “mouse moved,” “window resized” or “please choose a cursor.” |
+| Window procedure | A callback that Windows calls to deliver messages to a window. Its conventional type is `WNDPROC`. |
+| UI thread | The thread that created a window and runs its message handling. The game's existing UI thread also owns the mirror. |
+| Focus | The window that receives keyboard input. It is different from mouse capture. |
+| Mouse capture | A request to keep receiving mouse events even after the pointer leaves a window, useful during a drag. |
+| HDC | A drawing context: a Windows handle carrying a drawing destination and settings such as mapping, colors and selected objects. |
+| GDI | Windows' older drawing API: bitmaps, lines, text, palettes and brushes. |
+| HBITMAP / HBRUSH | Handles to a bitmap image and a painting brush. A pattern brush repeats a bitmap. |
+| DWM | Desktop Window Manager, Windows' desktop compositor. Its thumbnail API supplies the scaled game image. |
+| IAT | Import Address Table: executable slots holding addresses of functions imported from DLLs. |
+| Hook | Here, a wrapper substituted into one of those import slots. It is not a patch to the game's source or rendering algorithm. |
+
+Three message parameters deserve special attention. `message` identifies the
+event. `wParam` and `lParam` carry event-specific data; they are not always
+pointers or always coordinates. For a mouse message, `wParam` contains button
+flags and `lParam` packs X/Y. In other messages, the same integer-sized slots
+may carry a handle or a pointer to a structure. Each case must interpret them
+according to that message's contract.
+
+## The modules and a useful reading order
+
+The display DLL is built from small C modules. Headers state their interfaces;
+file-local state stays with the subsystem that owns it.
+
+| Read | File | Responsibility |
+|---|---|---|
+| 1 | [shim.c](../src/shim.c) | DLL startup, configuration and forwarding the required system MSVFW32 export. |
+| 2 | [display.c](../src/display.c) | The window pair, image geometry, menus/focus and six placement/display wrappers. |
+| 3 | [input.c](../src/input.c) | Mouse routing, synthetic cursor, capture and six input wrappers. |
+| 4 | [backdrop.c](../src/backdrop.c) | Load and tile the game's optional original background; fall back to brown. |
+| 5 | [hooks.c](../src/hooks.c) | Describe and replace selected executable import slots. |
+| 6 | [graphics.c](../src/graphics.c) | Observe 13 GDI and four painting/DC APIs; forward them unchanged. |
+| 7 | [text_log.c](../src/text_log.c) | Record four eligible text-drawing APIs without changing them. |
+| 8 | [diagnostics.c](../src/diagnostics.c) | Serialize output and periodically report hook counts/state. |
 
 ```mermaid
-flowchart LR
-    game["Game executable"] -->|"selected named IAT imports"| hooks["w_* wrappers"]
-    hooks -->|"saved destination or shim's own import"| windows["USER32 / GDI32"]
-    frame["Original game frame + child views"] -->|"DWM source crop g_src"| mirror["Owned ImperialismMirror window"]
-    mirror -->|"g_dest → g_src → child-client coordinates"| input["Synchronous game messages"]
-    input --> frame
-    game -->|"MCIWndCreateA export"| forward["System MSVFW32 DLL"]
+flowchart TB
+    startup["shim.c: start and read settings"] --> registry["hooks.c: replace selected import slots"]
+    registry --> display["display.c: windows and geometry"]
+    registry --> input["input.c: mouse, cursor and capture"]
+    display -->|"mouse/cursor events"| input
+    registry --> graphics["graphics.c: observe drawing"]
+    registry --> text["text_log.c: observe drawn strings"]
+    display --> backdrop["backdrop.c: optional tiled background"]
+    display --> log["diagnostics.c: output and summaries"]
+    graphics --> log
+    text --> log
 ```
 
-The drawing wrappers are observers. They do not scale the game's BitBlt calls,
-rebuild its palettes, enlarge its backing bitmaps or increase the map viewport.
-Windows DWM composes a thumbnail of the original frame into the presentation
-window. A failed thumbnail registration currently has no software fallback.
+The diagram groups responsibilities; it is not a separate thread per box.
+Drawing and input still happen through the game's calls and Windows' message
+delivery. Only periodic diagnostic summaries need a background worker.
 
-## Files and external contracts
+### How the files communicate
 
-| Item | Contract |
-|---|---|
-| `src/shim.c` | Proxy export, executable IAT hooks, presentation window, input mapping and diagnostics. |
-| `src/backdrop.c` / `src/backdrop.h` | Optional native-size stock bitmap tiling, validation and owned GDI resources. |
-| `src/msvfw32.def` | Export definition used by the build; preserve the proxy's required symbol/ABI. |
-| `build.py` | Builds the i386 display DLL; it does not install into the game directory. |
-| `tools/test_display.py` | Native process-lifetime smoke cases and DLL/import/export checks. |
-| `imperialism_shim.ini` | Startup configuration beside the DLL; edits require a new game process. |
-| `imperialism_gdi_log.txt` | General diagnostic file, truncated when this DLL attaches. |
-| `imperialism_text.log` | Optional ANSI drawing-text log, also truncated on attach. |
+[shim_internal.h](../src/shim_internal.h) is the private contract between these
+files. These C functions are internal to our DLL, not new game-facing exports.
 
-The proxy is loaded as `msvfw32.dll` beside `Imperialism.exe`. Only the
-executable's selected imported functions are redirected. Imports belonging to this
-shim or other DLLs are not patched. That distinction is essential: a helper's
-ordinary `SetCapture`, `ShowWindow`, `GetCursorPos` or `SetCursor` call reaches
-Windows directly and does not recursively enter the game's replacement wrapper.
+- `DisplayOptions` groups the four display settings. Startup calls
+  [display_configure](../src/display.c) to copy them into display-owned state.
+- `Hook` describes one imported function: library/name, replacement address,
+  saved original address and call count. `HookTable` is a list of these records
+  plus its length.
+- `graphics_hook_table`, `display_hook_table`, `input_hook_table` and
+  `text_hook_table` return their module's records.
+  [hooks_patch_executable](../src/hooks.c) collects them and patches the imports.
+- [display_frame_window](../src/display.c) and
+  [display_mirror_window](../src/display.c) return HWND values. Input can use
+  them without gaining direct access to the display module's private variables.
+- [display_map_point](../src/display.c) supplies the shared image-to-game
+  conversion. It may refresh the cached crop/thumbnail fit if the view changed.
+- The display callback calls [input_relay_mouse](../src/input.c),
+  [input_relay_cursor](../src/input.c) and
+  [input_mouse_leave](../src/input.c) for input events.
+  [input_has_mirror_capture](../src/input.c) tells deferred focus handling when
+  the mirror is still being used for a drag/capture.
+- [text_log_open](../src/text_log.c) opts into drawn-text capture.
+  [diagnostics_log](../src/diagnostics.c) writes general diagnostic lines.
+  Both file paths use the logging lock supplied by diagnostics.
+- [diagnostics_write_summary](../src/diagnostics.c) asks
+  [display_write_diagnostics](../src/display.c) for current geometry and
+  [hooks_write_counts](../src/hooks.c) for import/counter rows.
 
-[MCIWndCreateA](../src/shim.c#L1082) lazily loads `msvfw32.dll` using an explicit path from
-`GetSystemDirectoryA`, then resolves and caches `MCIWndCreateA`. It preserves
-the existing `__cdecl` declaration and returns NULL if resolution fails. It does
-not forward every MSVFW32 export, and it does not emulate CD audio; music belongs
-to the separate WINMM proxy. The cached system module is retained for process
-lifetime.
+State follows those responsibilities. `display.c` owns `game_frame`,
+`mirror_window`, `source_rect`, `destination_rect` and fullscreen/menu state.
+`input.c` owns `game_capture_target`, `virtual_cursor_position`, capture
+flags and `child_drag`. The text module owns its recent-string ring; diagnostics
+owns the output lock and worker. Splitting the files does not introduce extra
+UI threads or move game state into a new framework.
 
-## Coordinate spaces: keep them separate
+## Follow the program from startup
 
-| Space | Meaning and users |
-|---|---|
-| Frame client | Original unscaled game coordinates relative to `g_frame`'s client origin. `g_src` is a crop rectangle in this space. |
-| Mirror client | Pixels relative to `g_mirror`'s client origin, excluding its non-client frame/menu. `g_dest` is the fitted image rectangle here. Mouse messages arriving at the mirror use this space. |
-| Target client | Coordinates relative to the resolved game child HWND. `resolve_target` converts its argument in place from frame client to this space. |
-| Screen | Desktop coordinates used by window placement, `WM_NCHITTEST` and cursor APIs. `g_savedRect` stores an outer window rectangle in this space. |
-| Drawing DC | Coordinates passed to an intercepted drawing API. They belong to that HDC's mapping; the text log does not convert them into mirror or screen coordinates. |
+### 1. The game loads our proxy
 
-Startup calls `SetProcessDPIAware`, attempting legacy process DPI awareness.
-There is no per-monitor-v2 setup or `WM_DPICHANGED` handler. Do not interpret the
-implementation as a completed mixed-DPI/multi-monitor solution.
+The installed display file is named `msvfw32.dll` beside `Imperialism.exe`.
+The game expects that DLL name and imports `MCIWndCreateA` from it. Our proxy
+provides that export and uses DLL startup to initialize its compatibility work.
 
-For a mirror point `(mx, my)`, [map_point](../src/shim.c#L221) computes:
+[DllMain](../src/shim.c) is the Windows callback for attach/detach notifications.
+On process attach, startup initializes/opens diagnostics, attempts DPI awareness
+and installs the import wrappers. It then reads adjacent
+`imperialism_shim.ini` options, passes display settings to `display_configure`,
+optionally opens the text log, and starts the summary worker. Configuration is
+read once; editing the INI while the game runs does not reload it.
+
+The supported switches are:
+
+- `[display] fullscreen_integer_scale=1`: use whole-number fullscreen enlargement
+  where it fits. The source can still shrink fractionally on a smaller display.
+- `[display] block_mode_change=1`: preserve the desktop resolution while reporting
+  success to the game's display-mode requests.
+- `[display] brown_titlebar=1`: request a matching dark/brown caption on supported
+  Windows versions. This is independent of image scale and the tiled backdrop.
+- `[display] original_backdrop=1`: enable the optional original tile, with brown
+  as the failure/disabled fallback.
+- `[text_log] enabled=0`: drawn-text capture is off unless explicitly enabled.
+
+The exported [MCIWndCreateA](../src/shim.c) still has a real job. It loads the
+Windows system copy of MSVFW32 by an explicit system-directory path and calls
+the real export. An explicit path avoids finding this proxy again. It caches
+the resolved function for the process lifetime and returns NULL if resolution
+fails. Its calling convention and export definition must remain compatible with
+the game's caller.
+
+### 2. An import slot redirects a call
+
+Suppose the executable normally calls `CreateWindowExA` through an import slot:
 
 ```text
-frameX = g_src.left + MulDiv(mx - g_dest.left, sourceWidth, destinationWidth)
-frameY = g_src.top  + MulDiv(my - g_dest.top,  sourceHeight, destinationHeight)
+Before: game → IAT slot → USER32 CreateWindowExA
+After:  game → IAT slot → our wrapper → saved USER32 function
 ```
 
-The return value reports whether the original mirror point lies in the image,
-using left/top-inclusive and right/bottom-exclusive bounds. The output point is
-still extrapolated outside that rectangle, allowing an existing drag or capture
-to continue into the border. These are integer Win32 mappings; message packing
-still has Win32's signed 16-bit coordinate limitations.
+The [hook installer](../src/hooks.c) walks the main executable's named imports.
+For a registered DLL/function pair, it temporarily makes the slot writable,
+saves its original address, stores the wrapper address, then restores page
+protection.
 
-`g_virt` is **synthetic screen position**: the mapped frame-client point plus the
-real frame's screen origin. It is deliberately not the physical cursor's location
-on the enlarged mirror. The game's hooked cursor APIs expose this synthetic point
-while `g_virtActive` is set.
+A wrapper can inspect arguments, apply a narrow compatibility rule and call the
+saved original. Many wrappers simply log and forward.
 
-## State and thread ownership
+This distinction prevents recursion: **the executable's imports are patched;
+the shim's own imports are not.** A normal `SetCapture` call made inside our
+C code reaches Windows directly. A `SetCapture` call made through the game's
+patched slot reaches our wrapper.
 
-The window/mapping/capture state is intended to be owned by the frame's UI thread.
-The mirror is created inside that thread's intercepted window creation, so its
-procedures and synchronous messages run there too. There is no independent render
-thread. A separate worker prints summaries every five seconds.
+The installer handles ordinary named imports in the main 32-bit executable.
+It does not rewrite every DLL in the process or intercept arbitrary
+`GetProcAddress` lookups, delay imports or ordinal-only imports.
 
-| State | Meaning |
-|---|---|
-| `g_frame`, `g_frameProc` | Original game frame and its saved procedure for subclass chaining. |
-| `g_mirror`, `g_thumb` | Owned top-level presentation HWND and its DWM thumbnail registration. |
-| `g_src`, `g_dest` | Frame-client crop and mirror-client fitted image rectangle. |
-| `g_frameW/H`, `g_laidOut` | Normal frame **outer** size recorded once valid initial layout succeeds. |
-| `g_shown` | One-time thumbnail/show setup has been requested; it is not an up-to-date visibility query. |
-| `g_fullscreen`, `g_savedStyle`, `g_savedRect`, `g_menu` | Presentation mode, saved windowed style/outer rectangle, original menu handle. |
-| `g_originalBackdrop`, `g_backdrop` | Startup opt-in and optional bitmap/pattern objects loaded and freed by the UI thread. |
-| `g_capTarget` | Logical game capture HWND, distinct from physical Windows capture. |
-| `g_mirrorCap` | Shim expects the mirror to hold physical capture. |
-| `g_virt`, `g_virtActive` | Mapped synthetic screen cursor and whether the game should see it. |
-| `g_tracking` | A mirror mouse-leave notification has been requested. |
-| `g_inMenu`, `g_inSetCursor` | Focus deferral during menus, and a diagnostic cursor-dispatch marker. |
-| `g_drag.window/startFramePoint/startFramePosition/active` | Manually dragged game child, initial frame-client press point and original outer top-left. |
-| `g_closeDown` | Game child whose non-client close button was pressed. |
-| `g_msgHook` | UI-thread `WH_GETMESSAGE` registration for fullscreen shortcuts. |
-| `g_log`, `g_text`, `g_cs` | Output streams and lock shared by diagnostic/text writes. |
-| `g_recent`, `g_recentN` | Text hash/tick suppression ring and next insertion index, protected by `g_cs`. |
-| `Hook.count` | Atomic per-wrapper diagnostic counter, where that wrapper increments it. |
+### 3. Find the game frame and create the mirror
 
-`g_cs` protects log writes and the text ring. It does **not** serialize the
-presentation state. [summary_thread](../src/shim.c#L1027) queries window geometry and reads
-UI-owned caches through [diag](../src/shim.c#L993) without a consistent state snapshot;
-its report can combine adjacent UI states. IAT wrappers run on whichever
-executable thread calls them, so extending their state mutation to additional
-threads requires a new ownership design.
+The [CreateWindowExA wrapper](../src/display.c) forwards creation first, then
+recognizes the first successful unowned top-level window titled exactly
+`Imperialism`. A string class name is required by this discovery path.
 
-## Startup, window discovery and layout
+[mirror_init](../src/display.c) creates an owned top-level
+`ImperialismMirror` window on that same UI thread. “Owned” has a particular
+Windows meaning: the mirror stays above its owner and follows its minimize
+visibility. It does **not** mean that the mirror is a child drawn inside the
+game frame. This arrangement also avoids a second independent taskbar window.
 
-[DllMain](../src/shim.c#L1038) initializes the critical section, disables DLL thread
-notifications, opens the general log, attempts DPI awareness, initializes the
-hook table and patches the executable IAT. It then reads adjacent INI settings,
-opens the optional text log and starts the summary worker. The settings are:
+The real frame remains underneath at its normal size. Keeping it normal matters:
+the game still computes layouts and queries child positions using its original
+window. The mirror provides room to scale without asking the game to understand
+a larger playfield.
 
-| Setting | Default | Effect |
-|---|---|---|
-| `[display] block_mode_change` | 1 | Report success for game display-mode requests without changing the desktop. |
-| `[display] fullscreen_integer_scale` | 1 | Floor fullscreen scales of at least 1 to a whole number. |
-| `[display] brown_titlebar` | 1 | Request dark/brown DWM caption attributes where supported. |
-| `[display] original_backdrop` | 1 | Tile the running game's stock bitmap resource behind the image; fall back to brown. |
-| `[text_log] enabled` | 0 | Open the text log and capture eligible ANSI drawing calls. |
+The shim also **subclasses** the original frame: it saves the game's window
+procedure and substitutes a small wrapper. Subclassing here means inserting a
+callback before/after the existing handler, not deriving an MFC class.
+[frame_window_proc](../src/display.c) calls the original procedure and then applies the
+size constraint needed to keep the real frame covered.
 
-The initial defaults also exist as global initializers. Configuration is read
-once; there is no live reload.
+### 4. Wait for a usable view, then fit it
 
-[w_CreateWindowExA](../src/shim.c#L678) first calls the saved real function. The first
-successful window with no parent, a string class name and the exact title
-`Imperialism` becomes `g_frame`. This is a specific discovery heuristic, not a
-general MFC window finder. A class atom is logged numerically and does not trigger
-discovery.
+The game briefly creates a frame with provisional dimensions. The shim therefore
+defers first layout until it has a plausible game view.
 
-[mirror_init](../src/shim.c#L459) registers `ImperialismMirror` with double-click support
-and creates a hidden, owned, top-level `WS_OVERLAPPEDWINDOW`. Passing the frame
-as owner keeps the mirror above it and avoids a second independent taskbar
-window. It requests caption/border/text colors, saves/replaces the frame's
-procedure and installs a thread-local message hook. The numeric DWM caption
-attributes are best-effort requests; unsupported Windows versions can ignore them.
+[refresh_src](../src/display.c) looks for the frame's `AmbitGameWindow` child.
+It maps that child's rectangle into frame-client coordinates and clips it to
+the frame client. Before the child exists, it uses the frame client itself.
 
-[mirror_show](../src/shim.c#L540) registers the thumbnail once and either shows an already
-laid-out mirror or asks layout to finish. `g_shown` prevents duplicate setup.
-Layout is deferred because the game briefly creates its frame with implausible
-startup dimensions before settling to its normal view.
+[mirror_layout](../src/display.c) chooses an initial integer scale, adds room
+for the mirror's title bar/menu/borders, and centers it in the work area. It
+records the real frame's normal **outer** dimensions for later constraints.
 
-[mirror_layout](../src/shim.c#L500) waits for a source crop of at least 320×200, records the
-normal frame outer size, reuses its menu handle, then finds the largest scale
-from 6 down to 1 that fits `SPI_GETWORKAREA`. It adds mirror decorations/menu via
-`AdjustWindowRect`, centers the result, parks the underlying frame and updates
-the thumbnail. It does not recompute this initial choice on every resize. Its
-work-area query is the primary work area, unlike fullscreen's nearest-monitor
-choice.
+[mirror_update](../src/display.c) handles ongoing fitting. It preserves the
+game image's aspect ratio and centers it in the mirror client. A DWM thumbnail
+connects the source frame/crop to that destination rectangle. Windows, not a
+replacement BitBlt loop, produces the enlarged image.
 
-[refresh_src](../src/shim.c#L106) prefers the direct `AmbitGameWindow` child, maps its
-window rectangle into frame-client coordinates and intersects it with the
-frame client. Before that child exists it uses the whole frame client. It does
-not add separate owned popup windows outside the frame to the DWM source.
+[mirror_place_frame](../src/display.c) parks the frame's outer top-left at
+the mirror's client origin in screen coordinates. Client and outer origins
+differ because window borders/title bars occupy space.
 
-[mirror_update](../src/shim.c#L124) fits that crop into the current mirror client while
-preserving aspect ratio and centers it. In fullscreen, integer scaling applies
-only when the fit is at least 1; smaller displays can still use fractional
-downscaling. It sends DWM an opaque, visible, source-client-only thumbnail with
-both source and destination rectangles. Unused image margins show the optional
-stock tiled backdrop, with solid `RGB(84,46,8)` as the fallback; title tint remains
-independent of background painting.
+## A worked coordinate example
 
-[mirror_place_frame](../src/shim.c#L162) positions the real frame's **outer** top-left at
-the mirror's **client** screen origin without resizing or activating it. This is
-why its origin calculation uses `ClientToScreen`, rather than the mirror's
-outer window rectangle.
+There are four relevant coordinate systems:
 
-## Optional original tiled backdrop
+1. **Mirror client:** where the player clicked inside the enlarged presentation.
+2. **Frame client:** the game's original unscaled coordinates.
+3. **Target client:** coordinates relative to the specific child receiving input.
+4. **Screen:** desktop coordinates used by cursor and non-client APIs.
 
-The optional background is decorative and separate from DWM/input geometry.
-[backdrop.h](../src/backdrop.h) defines `Backdrop` with an owned `HBITMAP`
-and pattern `HBRUSH`. See [backdrop.md](backdrop.md) for the resource evidence and
-dedicated tests.
+The private `source_rect` in `display.c` is a crop in frame-client coordinates.
+`destination_rect` is the fitted image rectangle in mirror-client coordinates.
+They are
+two descriptions of the same image at different scales.
 
-`mirror_init` requests `backdrop_load(&g_backdrop, GetModuleHandleW(NULL))`
-on the UI thread, after startup and outside `DllMain`. It reads resource 281 of
-type `RT_BITMAP` from the **running game's executable module**. It does not
-load game artwork at build time or ship a bitmap in the release.
+Assume a 640×480 source and a 1920×1080 fullscreen mirror. With integer scaling,
+2× is the largest fit. The image becomes 1280×960, leaving margins:
 
-- [backdrop_load](../src/backdrop.c#L19) first frees any prior objects, validates
-  the stock 128×128 uncompressed 8-bit DIB/header/palette storage, then uses
-  `LoadImageW(..., LR_CREATEDIBSECTION)` and `CreatePatternBrush`. Missing or
-  mismatched resource data leaves an empty object, and failure after allocation
-  frees partial state.
-- [backdrop_paint](../src/backdrop.c#L66) fills the mirror client brown first.
-  When a pattern exists, it tiles at native size with brush origin (0,0), then
-  restores the caller's DC brush color/origin. The tile is not stretched along
-  with the game's image.
-- [backdrop_free](../src/backdrop.c#L8) deletes only its owned pattern/bitmap and
-  zeros the object. `LR_SHARED` is deliberately absent. `WM_DESTROY` calls it;
-  it is also safe on an empty/partially initialized object.
+```text
+source_rect      = (0, 0) to (640, 480)
+destination_rect = (320, 60) to (1600, 1020)
 
-With `original_backdrop=0`, or any resource/bitmap/brush failure, the same paint
-path remains plain brown. A successful tile load changes neither `g_src` nor
-`g_dest`, capture routing, virtual cursor coordinates or title-bar tint.
+player clicks mirror point (520, 260)
+subtract the margin:       (200, 200)
+divide by scale 2:         (100, 100) in the game frame
+```
 
-## Fullscreen, visibility and focus
+If the target child begins at frame point (80, 60), that child's handler receives
+(20, 40). Passing (520, 260) straight to it would select the wrong control.
 
-[mirror_toggle_fullscreen](../src/shim.c#L173) saves the mirror's windowed rectangle/style,
-removes its menu, changes it to a visible borderless popup and covers the nearest
-monitor. On exit it restores the saved style/menu/rectangle. It updates
-`g_fullscreen` after changing geometry, then explicitly refits because the
-synchronous `WM_SIZE` ran before that flag changed. This is borderless
-presentation, not a request to change desktop resolution.
+[display_map_point](../src/display.c) performs the first conversion using the actual
+source/destination rectangles. [resolve_target](../src/input.c) finds the
+child and converts the point into that child's client coordinates.
 
-[msg_hook](../src/shim.c#L203) consumes removed F11 `WM_KEYDOWN` or Return
-`WM_SYSKEYDOWN` messages. It ignores autorepeat using bit 30 and replaces the
-message ID with `WM_NULL`. The hook is scoped to the UI thread, not a global
-keyboard hook. Key-up messages and ordinary game shortcuts remain the game's
-responsibility.
+The game's cursor queries must agree too. If the real frame's client origin is
+screen point (1000, 500), the mapped frame point (100, 100) becomes **synthetic
+screen point (1100, 600)**. The cursor wrappers report that point to the game.
+They do not physically move the desktop cursor away from the enlarged image.
 
-[MirrorProc](../src/shim.c#L323) handles the window lifecycle:
+Raw X/Y logged by a text-drawing wrapper are a different matter: they belong to
+the supplied drawing context's mapping, not automatically to any of these four
+window coordinate systems.
 
-| Message/path | Purpose |
-|---|---|
-| `WM_SIZE`, `WM_MOVE`, restored `WM_SHOWWINDOW` | Refit and/or re-park the underlying frame. |
-| `WM_ERASEBKGND` | Paint brown and then the optional native-size stock tile; DWM supplies the fitted game image above it. |
-| `WM_GETMINMAXINFO` | Set the mirror's minimum tracking size so it can cover the recorded frame outer size. |
-| `SC_MINIMIZE` | Minimize the owner frame using the shim's unpatched API; ownership hides the mirror and retains one taskbar restore path. |
-| `WM_SETFOCUS`, private `WM_APP+1` | Defer keyboard focus back to the game frame, unless a menu or capture requires otherwise. |
-| Menu-loop messages | Hold focus during menu interaction, then request deferred handoff. |
-| `WM_INITMENU`, `WM_INITMENUPOPUP`, `WM_MENUSELECT` | Forward menu preparation/selection to the original frame and continue default mirror handling. |
-| `WM_COMMAND`, `WM_CLOSE` | Forward commands/close to the game frame. |
-| `WM_SETCURSOR` | Ask the mapped target to choose its cursor; retain whatever it sets, regardless of its return value. Use the arrow over unused background. |
-| Mouse move/button/double-click | Route through `mirror_mouse`. |
-| `WM_MOUSELEAVE` | Clear leave tracking and disable synthetic cursor coordinates unless capture remains. |
-| `WM_DESTROY` | Unregister the thumbnail and release the owned backdrop bitmap/pattern. |
+## Follow one mouse click through Windows
 
-[FrameProc](../src/shim.c#L439) always chains to the original frame procedure first. After
-`WM_GETMINMAXINFO`, it limits maximize/max-track sizes to the recorded normal
-outer dimensions. This complements, rather than replaces, the API placement
-hooks.
+Windows delivers messages by calling a window procedure. Our mirror procedure,
+[mirror_window_proc](../src/display.c), is therefore entered by the operating system;
+the shim does not poll for clicks in a loop.
 
-## Mouse routing, capture and child-window non-client behavior
+The game already runs a message loop: it retrieves queued events and asks Windows
+to dispatch them. For an ordinary queued mouse event, the route is:
 
-[mirror_mouse](../src/shim.c#L257) follows this sequence:
+```text
+mouse event → thread queue → game's message loop
+            → Windows dispatch → mirror_window_proc
+```
 
-1. Convert the mirror point to frame-client coordinates. Ignore background-only
-   input unless logical capture, mirror capture or a manual drag is already active.
-2. Request mouse-leave tracking if needed. Update `g_virt` before forwarding;
-   a synchronous game handler may query the cursor immediately.
-3. If manually dragging a game child's caption, move the child by the delta from
-   the initial press. Release the drag on left-button-up.
-4. Otherwise resolve the logical capture target or deepest visible child, converting
-   to its client coordinates.
-5. For uncaptured child non-client hits, send `WM_NCHITTEST` with synthetic screen
-   coordinates. A caption press starts the manual drag; a close-button press records
-   the target. A release over the same close button posts `SC_CLOSE`.
-6. Acquire physical mirror capture for ordinary button-down if no window owns it,
-   then synchronously send the original mouse message to the target with mapped
-   client coordinates.
-7. On button-up, release mirror capture only when the game holds no logical capture
-   and no left/right/middle button remains down.
+We reuse that loop because the mirror belongs to the same UI thread. Resizing is
+another event: `WM_SIZE` recomputes the image fit. `InvalidateRect` asks Windows
+to repaint the background later; it does not render the enlarged game itself.
+DWM keeps composing the game image independently.
 
-[resolve_target](../src/shim.c#L237) honors a valid `g_capTarget` first. Otherwise it
-descends with `ChildWindowFromPointEx(..., CWP_SKIPINVISIBLE)`. It does not
-explicitly filter disabled or transparent children. The point passed by pointer
-changes coordinate space during this walk.
+For an ordinary left-button click, [input_relay_mouse](../src/input.c) does this:
 
-The virtualized USER32 capture/cursor functions must agree with this routing:
+1. Map the mirror point into the original frame. A border-only click is ignored
+   unless an existing drag/capture needs to continue there.
+2. Update the synthetic cursor **before** delivering the event. The game's event
+   handler may immediately ask where the cursor is.
+3. Find the deepest visible game child under the point, unless the game already
+   requested capture to a particular child.
+4. Acquire physical mouse capture on the mirror when needed.
+5. Send the mouse message to the game child using the converted child coordinates.
+6. On release, stop capture when neither the game nor another held button needs it.
 
-| Function | Behavior |
-|---|---|
-| [w_SetCapture](../src/shim.c#L799) | For the frame/its descendants, save the logical requested target and capture the mirror physically; return the previous logical target. Other HWNDs use real capture. |
-| [w_ReleaseCapture](../src/shim.c#L813) | Clear logical capture flags and release physical capture. Manual drag/close state is managed separately. |
-| [w_GetCapture](../src/shim.c#L820) | Return the logical game target if set; otherwise return real Windows capture. |
-| [w_GetCursorPos](../src/shim.c#L826) | Supply `g_virt` when active and the caller supplies a point; otherwise call Windows. |
-| [w_GetMessagePos](../src/shim.c#L833) | Supply packed `g_virt` while active; otherwise report the real queued-message cursor position. |
-| [w_SetCursor](../src/shim.c#L767) | Forward the real cursor change and log whether it occurred inside the mirror's forwarded cursor query. |
+The core handoff looks like:
 
-The shim currently routes left/right/middle messages. It has no explicit wheel,
-horizontal-wheel, X-button, touch or pointer translation. It does not implement
-full Windows non-client behavior: child caption/close are special cases. Manual
-drag storage assumes a directly frame-parented game child. Capture cancellation
-and unexpected capture transfers have no complete `WM_CAPTURECHANGED`/
-`WM_CANCELMODE` state-reset path.
+```c
+SendMessageA(target, message, buttonState,
+             MAKELPARAM(targetPoint.x, targetPoint.y));
+```
 
-## Placement and drawing wrapper inventory
+`MAKELPARAM` packs X/Y into the format Windows expects. `SendMessageA` is
+**synchronous**: it runs the target's handler before returning. That handler may
+be implemented by the game's MFC/Ambit machinery, but the shim does not need to
+know its C++ class. It asks Windows to deliver the event to the HWND.
 
-These hooks are entered only through patched executable imports.
+Synchronous delivery also explains why state must be ready first. The target
+can call a hooked cursor/capture API before the outer mouse wrapper returns.
 
-| Function | Purpose and return behavior |
-|---|---|
-| [w_ChangeDisplaySettingsA](../src/shim.c#L660) | If configured, pretend both requested mode changes and restore requests succeeded; otherwise forward unchanged. |
-| [w_SetWindowPos](../src/shim.c#L714) | Replace game frame move coordinates with the mirror client screen origin, preserving other arguments/flags; forward, finish deferred layout if needed, then refit. |
-| [w_ShowWindow](../src/shim.c#L733) | Swallow frame self-minimize commands after mirror creation; forward other calls, hide the mirror on frame hide, otherwise invoke one-time show setup. |
-| [w_MoveWindow](../src/shim.c#L754) | Log the caller address; swallow moves targeting the mirror, forward other targets. It does not itself re-park a frame move. |
-| [w_SetWindowPlacement](../src/shim.c#L780) | Use a local copy to rewrite frame maximize as normal; swallow frame minimize; forward remaining cases. |
-| [w_GetDC](../src/shim.c#L689) / [w_ReleaseDC](../src/shim.c#L695) | Log and forward acquisition/release of a window DC. |
-| [w_BeginPaint](../src/shim.c#L700) / [w_EndPaint](../src/shim.c#L706) | Log paint state and forward; they do not add a paint loop. |
-| [w_BitBlt](../src/shim.c#L585) | Log source/destination DCs, geometry and raster operation, then forward. |
-| [w_PatBlt](../src/shim.c#L590) | Log destination geometry/raster operation, then forward. |
-| [w_StretchDIBits](../src/shim.c#L595) | Log source/destination rectangles and bitmap depth, then forward all data unchanged. |
-| [w_CreateDIBSection](../src/shim.c#L603) | Log bitmap metadata, then forward pixel-storage/section arguments unchanged. |
-| [w_CreateDIBitmap](../src/shim.c#L610) | Log header and initialization metadata, then forward. |
-| [w_CreateCompatibleDC](../src/shim.c#L615) / [w_CreateCompatibleBitmap](../src/shim.c#L621) | Log the requested/created compatible DC or bitmap, then preserve the real result. |
-| [w_CreatePalette](../src/shim.c#L626) / [w_SelectPalette](../src/shim.c#L631) / [w_RealizePalette](../src/shim.c#L636) | Observe palette use without changing colors or palette policy. |
-| [w_SetStretchBltMode](../src/shim.c#L641) / [w_GetDeviceCaps](../src/shim.c#L646) | Observe selected modes/capabilities; do not spoof them. |
-| [w_LineTo](../src/shim.c#L652) | Observe the line endpoint and preserve real drawing behavior. |
+### Why two capture states exist
 
-Game self-minimize calls and mirror-initiated user minimize are deliberately
-different paths. The latter uses this DLL's normal USER32 import, bypassing the
-executable IAT hook. Several swallowed calls return a success-like value; those
-values are compatibility policy rather than a faithful report of an operation
-that Windows performed.
+Without capture, moving out of a window during a drag could stop its events.
+The player is physically using the mirror, so Windows capture must belong to
+the mirror. The game, however, expects its own slider/view/dialog HWND to be
+the capture owner.
 
-## Import patching and descriptor machinery
+The input module keeps both meanings:
 
-`Hook` records imported DLL/symbol, wrapper address, saved destination and a
-counter. `DECL` creates one descriptor; `H` names it; `ORIG` casts the saved
-destination to the exact API type. [init_hook_table](../src/shim.c#L927) fills wrapper
-addresses. `g_hooks` is the common list used by patching and summaries.
+- **Physical capture:** the mirror HWND registered with Windows.
+- **Logical capture:** the game HWND remembered for its own capture queries.
 
-[patch_iat](../src/shim.c#L955) reads the main module's DOS/PE headers and ordinary import
-directory. It matches DLL names case-insensitively and symbol names exactly,
-skips ordinal imports, temporarily makes each matching IAT pointer writable,
-saves its old destination and writes the wrapper pointer. It attempts to restore
-the old protection afterward. Descriptors whose symbols are absent keep a NULL
-saved pointer and are shown as `NOT-IMPORTED`.
+The game's `SetCapture` wrapper stores its requested target and captures the
+mirror physically. `GetCapture` returns the logical target. While it is valid,
+target resolution chooses it even when the mapped point has moved outside its
+rectangle. `ReleaseCapture` clears that state and releases Windows capture.
 
-This is a PE32-specific one-time patch, not a general injection library:
-32-bit ordinal checks, DWORD function pointers, and `GetWindowLongA` procedure
-casts must all be revisited for a 64-bit port. It does not patch delay imports,
-other modules, dynamically resolved calls or subsequently loaded plugins. The
-fallback when `OriginalFirstThunk` is absent assumes usable name data in the
-first thunk; do not assume arbitrary bound/import layouts are supported.
+### Captions, close buttons and cursors
 
-## Diagnostic and text logs
+A child dialog's title bar is outside its client area. The shim asks Windows
+for a `WM_NCHITTEST` result at the synthetic screen position before treating
+it like a client click.
 
-[logf_](../src/shim.c#L32) serializes a timestamped formatted line and flushes it.
-`LOGCALL` atomically increments a hook counter on each use and emits only the
-first 40 detailed lines for that API. `w_MoveWindow` uses the same limit with
-its own formatting; `w_SetCursor` emits up to 80. Window procedures have separate
-bounded message counters. Capture/cursor-query/text wrappers do not all use
-`LOGCALL`, so a hooked API's zero counter does not prove it was never called.
+Caption hits start a manual drag, storing the initial press and window position.
+The close button records the pressed child and closes only if release is over
+that same close button. This is a small emulation of the specific game behavior;
+it is not a complete implementation of Windows non-client interaction.
 
-[dump_counts](../src/shim.c#L1011) takes the same log lock, calls [diag](../src/shim.c#L993) and prints
-each descriptor's saved-destination status/count. [summary_thread](../src/shim.c#L1027) does
-this every five seconds indefinitely; detach asks for one final summary.
-Both `logf_` and the periodic summary tolerate a failed general-log open and skip
-that output. A writable DLL directory is needed to obtain diagnostic files.
+For `WM_SETCURSOR`, the mirror asks the mapped game child to select a cursor.
+It keeps whatever cursor the game's handler set, even if the handler's return
+value is false. Unused background gets the ordinary arrow.
 
-[text_out](../src/shim.c#L851) implements the opt-in text capture:
+## Keyboard focus, menus and fullscreen
 
-- Negative length means NUL-terminated; capture at most 400 bytes.
-- Replace control bytes below 32 with spaces and trim trailing spaces.
-- Hash original bytes and drawing X/Y using an FNV-style rolling hash.
-- Under `g_cs`, suppress an equal hash seen within 1500 ms in a 128-entry ring.
-- Append and flush `<tick> <kind> <x>,<y> <text>`.
+Mouse capture does not determine keyboard focus. The mirror usually hands
+keyboard focus back to the game frame so the game's existing shortcuts continue
+working. It defers that handoff with a private posted message rather than forcing
+focus changes in the middle of every focus notification.
 
-Suppression does not include HDC or API kind and does not compare the full string;
-different draws can merge, including rare hash collisions. The hash uses bytes
-before whitespace normalization/trimming. Text is ANSI bytes, not guaranteed
-UTF-8, not OCR, and not a structured accessibility tree. Shadows or shifted
-duplicate strings may remain because their positions differ.
+`PostMessageA`, unlike `SendMessageA`, queues work for later. The deferred
+focus handler rechecks whether a menu or capture now needs focus before acting.
 
-| Tap | Kind | Exclusions |
-|---|---|---|
-| [w_TextOutA](../src/shim.c#L891) | `T` | None beyond text logger limits. |
-| [w_ExtTextOutA](../src/shim.c#L896) | `X` | Skip `ETO_GLYPH_INDEX`, whose payload is glyph indices. |
-| [w_TabbedTextOutA](../src/shim.c#L901) | `B` | Logs text/initial position, not expanded tab geometry. |
-| [w_DrawTextA](../src/shim.c#L906) | `D` | Skip `DT_CALCRECT` layout-only calls; require a rectangle. |
+The mirror reuses the game's menu handle. Menu preparation/selection and command
+messages are forwarded to the original frame; a menu loop temporarily suspends
+the focus handoff.
 
-Every tap preserves its real drawing call and return value. Logging happens
-before the call; therefore a log entry is evidence that drawing was requested,
-not proof the text became visible or that the original API succeeded.
+A UI-thread `WH_GETMESSAGE` hook watches messages removed from the queue. It
+consumes F11 and Alt+Enter key-down messages to toggle fullscreen, ignoring
+autorepeat. This is a thread-local Windows hook, not a global keyboard listener.
 
-## Resource lifetime and known limits
+Two different mechanisms are called a “hook” here. The IAT wrappers replace
+imported API addresses. `WH_GETMESSAGE` is a Windows-provided callback for
+watching queue retrieval. Only the latter handles these fullscreen shortcuts.
 
-This DLL is intended to remain loaded until process termination. Detach prints
-counts but does not restore the IAT, frame subclass or message hook; it does not
-signal/join the summary worker or comprehensively release files, brushes, menus
-and cached modules. Thumbnail and owned backdrop teardown exist in the mirror's
-destroy handler.
-Do not use explicit `FreeLibrary`/hot unload as a supported lifecycle.
+Fullscreen means a borderless mirror covering its nearest monitor. The shim
+saves/restores the windowed style, menu and outer rectangle. It does not need to
+change the desktop's display mode. The display-mode wrapper can report success
+to the game while leaving the actual mode alone.
 
-Other limits to preserve in issue reports and future work:
+There are also two different minimize paths:
 
-- DWM/window creation and several Win32 calls are best-effort; many failures are
-  logged incompletely or ignored. Registration failure can leave an empty mirror.
-- Log paths use fixed ANSI `MAX_PATH` buffers; obtaining files requires an adjacent
-  writable directory. Failed opens skip output. There is no rotating log or bounded
-  total log size.
-- Initial sizing and minimize/restore rules are specific to this game's startup
-  and frame behavior. `g_shown` is one-time setup; generic repeated hide/show
-  lifecycles have not been generalized.
-- The physical cursor is not warped by the mapping. Modal loops, outside popups,
-  unusual captures, unsupported mouse message types, mixed DPI and extreme
-  screen coordinates require separate validation.
-- The code runs startup work inside `DllMain` and assumes normal process attach/
-  exit. This documentation does not establish loader-lock-safe hot unloading.
-- Scaling reproduces the original view; it cannot reveal more map tiles or
-  increase original artwork resolution.
+- The game sometimes minimizes itself after losing focus. Its patched calls
+  are suppressed once the mirror exists.
+- The user minimizing the mirror should still work. That path calls the shim's
+  own unpatched API to minimize the owner frame and its owned mirror.
 
-## Build, validate and extend
+This difference is intentional compatibility policy.
 
-Run the native display checks after changing DLL code:
+## The backdrop is separate from the scaled image
+
+[backdrop.c](../src/backdrop.c) supplies the optional original crown/shield/swords
+tile. The UI thread reads bitmap resource 281 from the **running game's
+executable module**. No game artwork is required for building or distributed
+with the shim. See [backdrop.md](backdrop.md) for the evidence and resource checks.
+
+`backdrop_load` validates the known 128×128 uncompressed 8-bit bitmap and creates
+a bitmap/pattern brush. `backdrop_paint` paints solid brown first, then tiles the
+pattern at native size if available. `backdrop_free` releases the objects it owns.
+
+The game image can be scaled 2× while the background still repeats at 128×128.
+These are independent jobs: changing the background must not change image bounds
+or mouse conversion. Missing/invalid artwork, or `original_backdrop=0`, leaves
+the brown fallback.
+
+## Why so many drawing wrappers merely forward
+
+[graphics.c](../src/graphics.c) observes operations such as BitBlt, bitmap
+creation, palette selection and line drawing. Most wrappers record selected
+arguments and call the original function with the same arguments/result.
+
+Their presence does not mean the shim reimplements GDI. They are probes used to
+understand what the game asks Windows to draw. DWM supplies the presentation scale
+after the game has done its own drawing.
+
+Similarly, [text_log.c](../src/text_log.c) taps ANSI text-drawing functions.
+With text logging enabled, it records requested strings and positions before
+forwarding the real draw call. Glyph-index payloads and layout-only DrawText
+calls are excluded because they are not visible string requests.
+
+The logger captures at most 400 bytes, normalizes control whitespace and keeps
+a 128-entry ring of text/position hashes. An equal hash within 1.5 seconds is
+suppressed. API kind and drawing context are not in the hash, so distinct draws
+can merge; the hash can also collide. It is useful for a test harness reading
+labels, but it is not OCR or an accessibility tree. A logged request does not
+prove the API succeeded or that the text was visible.
+
+## Threads, diagnostics and resource lifetime
+
+Keep the window pair, coordinate rectangles, focus and capture state together
+on the UI thread. The game and mirror share that thread, so synchronous input
+delivery does not require inventing a second GUI message loop.
+
+[diagnostics.c](../src/diagnostics.c) supplies serialized file output and a
+periodic summary worker. Logging synchronization does not make all window state
+thread-safe; a diagnostic geometry report is not a transactional snapshot of
+the UI.
+
+The summary's rows are grouped by module: graphics, display, input, then text.
+There are 17, 6, 6 and 4 registered hooks respectively, for 33 in total.
+This is table order, not the order in which calls happened. Matching still uses
+the same DLL/API names; file extraction did not add new interception targets.
+
+Hook counters also need careful interpretation. Some wrappers count/log their
+first calls; cursor and window-procedure diagnostics use different limits.
+Not every hooked API increments a counter. A zero counter is not proof that the
+API was unused.
+
+The general log is `imperialism_gdi_log.txt`; optional drawn text goes to
+`imperialism_text.log`. They are beside the DLL and truncated at startup.
+Failed opens skip output. Files require a writable directory, and the current
+logger has no rotation or total-size bound.
+
+The DLL is designed to remain loaded for the game's process lifetime. Normal
+mirror destruction unregisters the DWM thumbnail and frees backdrop objects.
+It is not a supported hot-unload library: detach does not comprehensively undo
+import patches, subclassing, hooks, worker lifetime and every cached resource.
+
+## Reading the C without guessing at platform syntax
+
+- `CALLBACK` and `WINAPI` specify calling conventions used by Windows.
+  Preserve them when moving functions; they affect how a 32-bit caller/callee
+  agree to pass arguments and clean the stack.
+- `const TYPE *` in a wrapper often means Windows supplies an input structure;
+  `TYPE *` may be an output parameter. Read the function contract before changing it.
+- A saved API address must be called through the correct function-pointer type.
+  Those casts describe the API signature; they are not converting a bitmap or
+  changing game data.
+- `WM_*` constants identify messages. A large message `switch` groups events
+  handled by one window; unhandled events go to Windows' default procedure.
+- `GetClientRect` measures the drawable inside; `GetWindowRect` measures the
+  outer window in desktop coordinates. Mixing those rectangles causes offsets.
+- `MapWindowPoints` converts coordinates between window origins. It is not
+  applying the mirror's scale; the explicit image mapping does that first.
+- `SetWindowPos` changes geometry/placement. Flags can request “do not resize”
+  or “do not activate,” so all its arguments must be read together.
+- `GetModuleHandleW(NULL)` refers to the running executable module. The `A`/
+  `W` suffixes distinguish narrow-byte and wide-character Windows API variants.
+
+The wrapper pattern in [graphics.c](../src/graphics.c) can be read one step at a
+time. This is the original-function part of the line-drawing wrapper:
+
+```c
+typedef BOOL (WINAPI *OriginalFunction)(HDC, int, int);
+OriginalFunction original =
+    (OriginalFunction)hook_LineTo.original;
+
+return original(deviceContext, endX, endY);
+```
+
+The `typedef` names the type “pointer to the Windows LineTo signature.”
+The next statement treats the saved address as that callable type.
+The final statement calls the real API; the shim has not invented new line
+drawing. Other wrappers use the matching signature for their own API.
+
+Only two small convenience macros remain in
+[hook_support.h](../src/hook_support.h): `DECLARE_HOOK` creates a named
+descriptor, and `LOG_HOOK` counts/logs its first 40 calls. They do not hide
+the original function call. The `#` operator makes an API name into a string;
+`##` joins tokens to form an identifier such as `hook_LineTo`.
+
+Short names are not required by Win32. Parameters and local state should name
+their role and coordinate space. The few conventional Windows types/constants
+that remain should be explained where their behavior matters, rather than
+assuming every reader already knows them.
+
+## Limits and verification
+
+The current implementation is specific to the 32-bit GOG Windows executable:
+
+- It assumes a particular frame title and view class, one game/mirror pair,
+  and the game's observed startup/placement behavior.
+- DWM must supply the thumbnail. There is no software image fallback.
+- DPI awareness is legacy process-wide setup, not complete per-monitor DPI handling.
+- Explicit mouse routing covers left/right/middle buttons, not wheel, X-button,
+  touch or every capture-cancellation path.
+- Separate popups outside the source frame, unusual modal loops and extreme
+  screen coordinates need their own validation.
+- The presentation worker/reporting design does not establish safe explicit
+  `FreeLibrary` unloading.
+
+Build/check commands remain:
 
 ```powershell
 python -I build.py
 python -I tools/test_display.py
 ```
 
-The smoke hosts are process-lifetime tests. Their interception/text/metadata
-checks do not demonstrate correct mouse mapping, menus, dragging, fullscreen,
-audible music or every game screen. The display suite also checks synthetic
-resource backdrop loading/native-size tiling, invalid or missing data falling back
-to brown, and resource-only loading without executing a fixture module. Optional
-local checks can inspect the installed executable; no game asset belongs in CI. In-game acceptance is a separate local
-harness and must restore DLLs/INI/settings and leave the game stopped even after
-failure. See [README](../README.md) and [STATUS](STATUS.md) for current commands,
-results and publishing policy.
+Native tests check DLL shape, interception/text logging and synthetic backdrop
+behavior. They do not prove correct real-game input/focus/fullscreen or audible
+music. Use [STATUS.md](STATUS.md) for the evidence actually obtained and
+[README.md](../README.md) for current build/install/release instructions.
+In-game acceptance must restore installed DLLs, INIs/settings and a stopped game
+even when a test fails.
 
-When extending presentation, leave the source crop and destination geometry as
-one shared contract between DWM and input mapping. Do not independently change
-painting scale, cursor coordinates or capture routing. Keep optional background
-rendering separate from the game image and preserve a solid-color failure path.
-Any new HWND procedure, worker or decoder resource needs an explicit ownership
-and failure plan; the existing process-lifetime behavior is not a reusable
-unload protocol.
+For a presentation change, trace both directions: **which original pixels does
+Windows show, and which original game point does a player action reach?**
+Keeping those two answers consistent is the central constraint of this shim.
