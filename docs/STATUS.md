@@ -2,6 +2,12 @@
 
 2026-11-01. Shim documentation, original backdrop and automatic release publication.
 
+Published preview: [v0.1.0-preview.1](https://github.com/warthurton/imperialism-compat/releases/tag/v0.1.0-preview.1),
+from commit `02ed0881196e168e2a2cc8598c906a841a0625cf`.
+The [tag workflow](https://github.com/warthurton/imperialism-compat/actions/runs/41324720220)
+passed and published all three ZIPs plus `SHA256SUMS.txt`; the release is public
+and marked as a prerelease. Existing music-stability and live-focus limits below apply.
+
 ## Implemented
 
 - Full display-shim developer guide in `docs/display-shim.md`; all original functions
