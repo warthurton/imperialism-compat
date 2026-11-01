@@ -15,9 +15,14 @@ confirmed solution. Reports with reproducible steps would help narrow it down.
 
 The [source and installation instructions](https://github.com/warthurton/imperialism-compat)
 and [Windows CI artifacts](https://github.com/warthurton/imperialism-compat/actions/workflows/build.yml)
-are available now. Native smoke tests passed, and both music alternatives completed
-a short in-game turn test with the display shim. This is limited acceptance coverage.
+are available now, along with the published
+[v0.1.0-preview.1 downloads](https://github.com/warthurton/imperialism-compat/releases/tag/v0.1.0-preview.1).
+The display shim can reuse the game's faint heraldic background tile, with plain
+brown if unavailable; the download includes no game artwork. Native smoke tests
+passed. The earlier extracted build completed short in-game turn tests with both
+music alternatives; the documented/backdrop follow-up's live retest stopped at a
+foreground-focus guard, also seen with the older build. Acceptance coverage is limited.
 No game executable, artwork or music is distributed. Back up the original DLLs before
 trying it, and restore those backups to remove it.
 
-<!-- Draft only. Add a reviewed preview-release URL before posting. No forum post has been sent. -->
+<!-- Draft for maintainer review. No forum post has been sent. -->

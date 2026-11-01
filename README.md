@@ -4,6 +4,9 @@ Display and music compatibility shims for **Imperialism (1997)** on Windows.
 An unofficial fan project by Wayne Arthurton. You need your own copy of the game;
 these downloads contain no game executable, artwork, music or saves.
 
+**[Download preview v0.1.0-preview.1](https://github.com/warthurton/imperialism-compat/releases/tag/v0.1.0-preview.1)**
+— display and music packages, source bundles and checksums.
+
 Compat was deliberately extracted from
 [Imperialism RE](https://github.com/warthurton/imperialism-re) to separate two jobs:
 this repository maintains runtime display/music compatibility and releases; RE
