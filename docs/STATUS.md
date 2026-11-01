@@ -17,6 +17,8 @@
   https://github.com/warthurton/imperialism-compat/actions/runs/41266369364.
 - Packaging binds test reports to DLL hashes and rechecks music build inputs,
   including extracted codec trees against their pinned source archives.
+  The follow-up passed Windows CI, including all five rejection checks:
+  https://github.com/warthurton/imperialism-compat/actions/runs/41267009413.
 - Local game acceptance passed with the display shim and each music variant: load
   `oil_plant_built`, capture before/idle/after and complete game turn 5 -> 6.
   Both variants passed all ten snapshot checks. The acceptance harness restored
@@ -28,7 +30,7 @@
 - The intermittent music-loss/crash issue remains unresolved.
 - No rapid play/stop, EOF/drain, injected failure or hot-unload tests yet.
 - Smoke tests do not verify audible output or actual game transitions.
-- Verify CI for the packaging-integrity follow-up; review release and forum text
-  before publishing. No release tag or public release has been created.
+- Review release packages and forum text before publishing. No release tag or
+  public release has been created. CI artifacts are available from the workflow.
 
 The reverse-engineering workspace keeps its own snapshot/portable-core handoff.
