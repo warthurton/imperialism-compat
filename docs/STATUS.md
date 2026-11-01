@@ -13,7 +13,15 @@
 - Both music variants passed local generated-tone decoding and native CD-audio
   open/status/length/close/process-exit tests. The GOG variant used the installed
   game's codec DLLs in a temporary local test directory.
-- CI workflow and source-inclusive packages prepared; hosted CI not yet run.
+- Public repository created; initial Windows CI passed at commit `5d43f3e`:
+  https://github.com/warthurton/imperialism-compat/actions/runs/41266369364.
+- Packaging binds test reports to DLL hashes and rechecks music build inputs,
+  including extracted codec trees against their pinned source archives.
+  The follow-up passed Windows CI, including all five rejection checks:
+  https://github.com/warthurton/imperialism-compat/actions/runs/41267009413.
+- A later documentation-only CI run hit a TLS EOF fetching libogg. Downloads now
+  retry transient connection failures up to three times; checksum errors still fail
+  immediately. Four offline checks cover recovery, retry limits, 404 and checksum failures.
 - Local game acceptance passed with the display shim and each music variant: load
   `oil_plant_built`, capture before/idle/after and complete game turn 5 -> 6.
   Both variants passed all ten snapshot checks. The acceptance harness restored
@@ -25,7 +33,7 @@
 - The intermittent music-loss/crash issue remains unresolved.
 - No rapid play/stop, EOF/drain, injected failure or hot-unload tests yet.
 - Smoke tests do not verify audible output or actual game transitions.
-- Run hosted CI after creating/pushing the standalone repository; review draft release
-  and forum text before publishing.
+- Review release packages and forum text before publishing. No release tag or
+  public release has been created. CI artifacts are available from the workflow.
 
 The reverse-engineering workspace keeps its own snapshot/portable-core handoff.

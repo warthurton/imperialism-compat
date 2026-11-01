@@ -19,7 +19,10 @@ jobs:
         with:
           persist-credentials: false
       - name: Fetch pinned sources and toolchain
+        # Downloads retry transient connection/HTTP failures; checksum errors fail immediately.
         run: python -I tools/fetch_deps.py --toolchain
+      - name: Check download failure handling
+        run: python -I tools/test_fetch.py
       - name: Build display shim
         run: python -I build.py
       - name: Check display ABI and native behavior
@@ -29,7 +32,7 @@ jobs:
       - name: Check music ABI and generated-tone metadata
         run: python -I tools/test_music.py
       - name: Package and verify release contents
-        run: python -I tools/package.py
+        run: python -I tools/test_package.py
       - name: Display artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

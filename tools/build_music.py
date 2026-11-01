@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build import find_compiler
 from pe import inspect_dll
+from provenance import music_inputs
 
 PINS = json.loads((ROOT / 'dependencies.json').read_text())
 REQUIRED = ['ov_clear', 'ov_fopen', 'ov_info', 'ov_read', 'ov_time_seek', 'ov_time_total']
@@ -46,6 +47,7 @@ def build_codecs(compiler):
 
 
 def build_music(compiler, game_codec=None):
+    inputs = music_inputs()
     source = ROOT / 'deps/ogg-winmm'
     pin = PINS['ogg_winmm']['commit']
     actual = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
@@ -78,7 +80,9 @@ def build_music(compiler, game_codec=None):
             raise ValueError('Unexpected codec linkage: ' + variant)
         records[variant] = {'sha256': hashlib.sha256(destination.read_bytes()).hexdigest(),
                             **information}
-    information = {'source_commit': pin, 'libogg': PINS['libogg']['version'],
+    if music_inputs() != inputs:
+        raise ValueError('Music inputs changed during compilation')
+    information = {'source_commit': pin, 'input_sha256': inputs, 'libogg': PINS['libogg']['version'],
                    'libvorbis': PINS['libvorbis']['version'], 'variants': records,
                    'game_codec_checked': str(game_codec) if game_codec else None,
                    'game_codec_sha256': hashlib.sha256(game_codec.read_bytes()).hexdigest() if game_codec else None}

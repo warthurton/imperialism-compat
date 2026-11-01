@@ -12,6 +12,19 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build import input_hashes
 from pe import inspect_dll
+from provenance import music_inputs
+
+
+def verified_report(path, expected_hashes):
+    data = path.read_bytes()
+    report = json.loads(data)
+    if report['status'] != 'ok' or report['errors']:
+        raise ValueError('Tests did not pass: ' + str(path))
+    for variant, expected in expected_hashes.items():
+        result = report['result'][variant] if variant else report['result']
+        if result.get('dll_sha256') != expected:
+            raise ValueError('Test report is stale; rerun tests: ' + str(path))
+    return data
 
 
 def tracked_files(repository):
@@ -47,6 +60,12 @@ def package():
     music_build = json.loads((ROOT / 'build/music/build-info.json').read_text())
     if music_build['source_commit'] != pins['ogg_winmm']['commit']:
         raise ValueError('Music source pin differs from compiled build')
+    if music_build.get('input_sha256') != music_inputs():
+        raise ValueError('Music source/build inputs changed since compilation; rebuild first')
+    display_report = verified_report(ROOT / 'build/display-test-report.json',
+                                     {'': display_build['dll_sha256']})
+    music_report = verified_report(ROOT / 'build/music/test-report.json',
+                 {variant: info['sha256'] for variant, info in music_build['variants'].items()})
     commit = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip()
     dirty = bool(subprocess.check_output(['git', '-C', str(ROOT), 'status', '--porcelain'], text=True))
     metadata = {'version': version, 'source_commit': commit, 'source_tree_dirty': dirty}
@@ -73,7 +92,7 @@ def package():
         raise ValueError('Display DLL changed since compilation')
     display_files = dict(common, **{'msvfw32.dll': display.read_bytes(),
                          'imperialism_shim.ini': (ROOT / 'imperialism_shim.ini').read_bytes(),
-                         'test-report.json': (ROOT / 'build/display-test-report.json').read_bytes()})
+                         'test-report.json': display_report})
     display_zip = dist / ('imperialism-compat-display-' + version + '-win32.zip')
     archive(display_zip, display_files, dict(metadata, component='display', build=display_build))
     outputs.append(display_zip)
@@ -89,7 +108,7 @@ def package():
                      'COPYING-libogg.txt': (ROOT / 'deps' / pins['libogg']['directory'] / 'COPYING').read_bytes(),
                      'COPYING-libvorbis.txt': (ROOT / 'deps' / pins['libvorbis']['directory'] / 'COPYING').read_bytes(),
                      'corresponding-source.zip': source_archive.read_bytes(),
-                     'test-report.json': (ROOT / 'build/music/test-report.json').read_bytes()})
+                     'test-report.json': music_report})
         destination = dist / ('imperialism-compat-music-' + variant + '-' + version + '-win32.zip')
         # Deliberately omit the local game path and hash from distributable metadata.
         archive(destination, files, dict(metadata, component='music', codec_variant=variant,

@@ -1,5 +1,6 @@
 # Usage: python -I tools/test_display.py [--compiler PATH]
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -16,6 +17,7 @@ from pe import inspect_dll
 
 def test(compiler):
     dll = ROOT / 'build/msvfw32.dll'
+    tested_hash = hashlib.sha256(dll.read_bytes()).hexdigest()
     information = inspect_dll(dll, ['MCIWndCreateA'])
     if information['exports'] != ['MCIWndCreateA']:
         raise ValueError('Unexpected display exports')
@@ -37,7 +39,10 @@ def test(compiler):
                 raise ValueError('Text-log setting was not honored')
             if enabled and 'shim smoke' not in text.read_text():
                 raise ValueError('TextOutA capture missing')
-    report = {'status': 'ok', 'result': {'abi': information, 'smoke_cases': 2}, 'errors': [], 'warnings': []}
+    if hashlib.sha256(dll.read_bytes()).hexdigest() != tested_hash:
+        raise ValueError('Display DLL changed during testing')
+    report = {'status': 'ok', 'result': {'abi': information, 'smoke_cases': 2,
+              'dll_sha256': tested_hash}, 'errors': [], 'warnings': []}
     (ROOT / 'build/display-test-report.json').write_text(json.dumps(report, indent=2) + '\n')
     return report
 
