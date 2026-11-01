@@ -2,12 +2,13 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdio.h>
+#include <string.h>
 
 int main(int argc, char **argv)
 {
     HMODULE module;
     HDC context;
-    if (argc != 2) return 2;
+    if (argc != 2 && !(argc == 3 && !strcmp(argv[2], "--wait-summary"))) return 2;
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
     module = LoadLibraryA(argv[1]);
     if (!module) {
@@ -21,6 +22,7 @@ int main(int argc, char **argv)
     if (!context) return 5;
     TextOutA(context, 10, 20, "shim smoke", 10);
     DeleteDC(context);
+    if (argc == 3) Sleep(5500); /* Exercise the worker when its diagnostic file could not open. */
     puts("loaded x86 shim and resolved MCIWndCreateA");
     /* The shim owns a process-lifetime worker; terminate the host rather than unloading it. */
     return 0;

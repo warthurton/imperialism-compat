@@ -13,4 +13,6 @@ music-wrapper build tooling; the game-logic reimplementation remains in imperial
   restore installed DLLs, settings and stopped-game state even on failure.
 - Do not claim that metadata/decoder smoke tests prove audible playback or solve the
   intermittent music-loss problem. Record what was actually exercised.
-- Release workflows create drafts; publishing and forum posting are maintainer actions.
+- Matching version-tag CI publishes GitHub Releases after all checks pass. Versions
+  with a suffix publish as prereleases. Keep published assets immutable on reruns.
+  Forum posting remains a maintainer action.

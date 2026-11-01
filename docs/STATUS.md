@@ -1,9 +1,30 @@
 # Status
 
-2026-10-31. Initial standalone preparation; no public release published.
+2026-11-01. Shim documentation, original backdrop and automatic release publication.
 
 ## Implemented
 
+- Full display-shim developer guide in `docs/display-shim.md`; all original functions
+  annotated and dense local/parameter names expanded without changing input/hook logic.
+- Stock backdrop identified as executable bitmap 281: a 128x128 crown/shield/swords
+  tile on RGB(84,46,8). `docs/backdrop.md` records the resource and frame-painter evidence.
+  The UI thread loads the owner's bitmap at runtime and frees its GDI objects on
+  mirror destruction. Invalid/missing artwork falls back to brown; `original_backdrop=0`
+  opts out. No game artwork is distributed.
+- Native checks passed for synthetic tiling, missing/truncated resources, data-only
+  loading without running fixture code, and the installed game's actual resource.
+  Display interception/text logging and the worker's unwritable-log path passed.
+- Version-tag CI now publishes complete releases (suffix versions are prereleases),
+  verifies release checksums, serializes publication by tag and preserves published
+  assets on reruns. Five offline publication-guard checks pass.
+- The RE repository now references Compat as a pinned Git submodule, deliberately
+  separating runtime compatibility/releases from decompilation and game-logic research.
+- Current live attempt `compat_backdrop1` stopped at the existing focus guard before
+  fixture input. The restored older shim also stopped there (`snapshot_focus_baseline1`),
+  so no new live turn/fullscreen acceptance is claimed. The new startup log confirms
+  bitmap 281 loaded, a DWM thumbnail registered and the mirror laid out. Both attempts
+  ended with the game stopped and settings restored; the Compat harness also restored
+  and hash-checked the original DLLs/INIs. Native backdrop painting checks passed.
 - Existing display implementation extracted, with a corrected introductory comment.
 - Standalone build and native i386 DLL/export/import checks.
 - Display smoke cases verify IAT display-mode interception and text logging off/on.
@@ -33,7 +54,7 @@
 - The intermittent music-loss/crash issue remains unresolved.
 - No rapid play/stop, EOF/drain, injected failure or hot-unload tests yet.
 - Smoke tests do not verify audible output or actual game transitions.
-- Review release packages and forum text before publishing. No release tag or
-  public release has been created. CI artifacts are available from the workflow.
+- Review forum text before posting. Version-tag CI publishes release packages
+  automatically after checks pass; branch/PR builds remain ordinary CI artifacts.
 
 The reverse-engineering workspace keeps its own snapshot/portable-core handoff.
