@@ -27,6 +27,8 @@ jobs:
         run: python -I tools/test_release.py
       - name: Build display shim
         run: python -I build.py
+      - name: Check shim source formatting
+        run: python -I tools/check_style.py
       - name: Check display ABI and native behavior
         run: python -I tools/test_display.py
       - name: Build both music variants

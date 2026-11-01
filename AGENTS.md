@@ -9,6 +9,10 @@ music-wrapper build tooling; the game-logic reimplementation remains in imperial
 - Use topic branches after the initial repository bootstrap. Keep docs/STATUS.md current.
 - Write text/scripts/messages to files with editing tools; shell commands stay short.
 - Build/check commands are in README. Run native tests after changing DLL/build code.
+- Optimize shim code for readers who do not already know Win32/MFC. Explain platform
+  concepts and the reason for unusual behavior where they are used. Keep module-owned
+  state private and preserve Windows ABI/thread/resource contracts. Format src/*.c/h
+  with the checked-in .clang-format; CI enforces a 100-column maximum.
 - Native smoke tests are process-lifetime hosts. In-game acceptance is separate and must
   restore installed DLLs, settings and stopped-game state even on failure.
 - Do not claim that metadata/decoder smoke tests prove audible playback or solve the

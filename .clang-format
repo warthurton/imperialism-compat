@@ -1,0 +1,17 @@
+BasedOnStyle: LLVM
+Language: Cpp
+ColumnLimit: 100
+LineEnding: LF
+IndentWidth: 4
+BreakBeforeBraces: Linux
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+BinPackArguments: false
+BinPackParameters: false
+SortIncludes: Never
+BreakStringLiterals: true
+ReflowComments: true
+AlignTrailingComments: false
+PenaltyReturnTypeOnItsOwnLine: 1000

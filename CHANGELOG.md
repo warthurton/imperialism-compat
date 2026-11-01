@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Split the display shim into eight focused C modules with private state and explicit contracts.
+- Explain Windows concepts inline and in a beginner walkthrough; replace hidden original-call casts
+  with named types and enforce 100-column C/header formatting in CI.
+- Make README the user guide, including behavior changes and every supported INI option;
+  move build/check/CI/release instructions to `docs/development.md`.
+- Record the maintainer's observation: music loss/crashes appear fixed, but not proven in all cases.
+
 ## 0.1.0-preview.1
 
 - Deliberately extract the display shim and music build tooling from Imperialism RE:
@@ -16,4 +25,4 @@
 - Add native smoke tests, package manifests/source bundles and Windows CI.
 - Publish complete GitHub Releases automatically from matching version tags after
   CI passes; version suffixes mark prereleases and reruns preserve published assets.
-- Preserve the known limitation: intermittent music loss/crashes are not proven fixed.
+- Preserve the known limitation: music loss/crashes appear fixed in observed use, but are not proven fixed in all cases.

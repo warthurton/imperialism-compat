@@ -9,7 +9,12 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parent
 FLAGS = ['-O2', '-Wall', '-Werror', '-shared', '-static']
-INPUTS = ['src/shim.c', 'src/backdrop.c', 'src/backdrop.h', 'src/msvfw32.def']
+SOURCES = [
+    'src/shim.c', 'src/display.c', 'src/input.c', 'src/graphics.c',
+    'src/text_log.c', 'src/hooks.c', 'src/diagnostics.c', 'src/backdrop.c',
+]
+HEADERS = ['src/shim_internal.h', 'src/hook_support.h', 'src/backdrop.h']
+INPUTS = [*SOURCES, *HEADERS, 'src/msvfw32.def']
 
 
 def find_compiler(explicit=None):
@@ -36,7 +41,7 @@ def build(compiler, output):
     output.mkdir(parents=True, exist_ok=True)
     destination = output / 'msvfw32.dll'
     subprocess.run([compiler, *FLAGS, '-o', str(destination),
-                    *(str(ROOT / name) for name in INPUTS if not name.endswith('.h')),
+                    *(str(ROOT / name) for name in [*SOURCES, 'src/msvfw32.def']),
                     '-luser32', '-lgdi32', '-ldwmapi'], check=True)
     information = {
         'compiler': subprocess.check_output([compiler, '--version'], text=True).splitlines()[0],
