@@ -238,7 +238,7 @@ BOOL display_map_point(LPARAM mirrorPosition, POINT *framePoint)
 }
 
 /* The reverse of display_map_point: where in the mirror does a point of the original
-* frame appear? Used by the test hook so a harness can name spots in game pixels.
+ * frame appear? Used by the test hook so a harness can name spots in game pixels.
  * The point is aimed at the middle of its scaled pixel, so rounding in the forward
  * mapping cannot move it to a neighbour. */
 static LPARAM game_point_to_mirror(int frameX, int frameY)
@@ -402,10 +402,21 @@ static LRESULT CALLBACK mirror_window_proc(HWND mirrorWindow,
             BOOL inside = display_map_point(at, &back);
             diagnostics_log("test click game=(%d,%d) mirror=(%d,%d) back=(%ld,%ld) inside=%d "
                             "dest=(%ld,%ld,%ld,%ld) src=(%ld,%ld,%ld,%ld)",
-                            GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam), GET_X_LPARAM(at),
-                            GET_Y_LPARAM(at), back.x, back.y, (int)inside, destination_rect.left,
-                            destination_rect.top, destination_rect.right, destination_rect.bottom,
-                            source_rect.left, source_rect.top, source_rect.right, source_rect.bottom);
+                            GET_X_LPARAM(lParam),
+                            GET_Y_LPARAM(lParam),
+                            GET_X_LPARAM(at),
+                            GET_Y_LPARAM(at),
+                            back.x,
+                            back.y,
+                            (int)inside,
+                            destination_rect.left,
+                            destination_rect.top,
+                            destination_rect.right,
+                            destination_rect.bottom,
+                            source_rect.left,
+                            source_rect.top,
+                            source_rect.right,
+                            source_rect.bottom);
             input_relay_mouse(mirrorWindow, WM_MOUSEMOVE, 0, at);
             Sleep(60);
             input_relay_mouse(mirrorWindow, WM_LBUTTONDOWN, MK_LBUTTON, at);
