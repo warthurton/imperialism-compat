@@ -27,7 +27,17 @@ typedef struct {
     BOOL block_mode_change;
     BOOL brown_titlebar;
     BOOL original_backdrop;
+    BOOL test_hook; /* [test_hook] enabled=1: accept WM_TEST_CLICK on the mirror window */
 } DisplayOptions;
+
+/* Test hook (off unless [test_hook] enabled=1 in imperialism_shim.ini). A test harness posts
+ * this message to the mirror window with lParam = MAKELPARAM(x, y) in the GAME's own pixels
+ * (the original 640x480 frame). The shim then performs a left click there exactly as if the
+ * player had clicked the matching spot in the scaled mirror: the same code path as a real
+ * mouse, including modal pop-ups that ignore messages posted straight to their buttons.
+ * It needs no focus, no cursor movement and no mirror scaling. PostMessage it (not
+ * SendMessage): a click that opens a modal pop-up does not return until the pop-up closes. */
+#define WM_TEST_CLICK (WM_APP + 0x40)
 
 /* Module-owned lists are registered once at startup, before patching any imports. */
 HookTable graphics_hook_table(void);

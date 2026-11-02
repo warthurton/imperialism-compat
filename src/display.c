@@ -34,6 +34,7 @@ static BOOL use_integer_scale = TRUE; /* [display] fullscreen_integer_scale in t
 static BOOL use_brown_titlebar = TRUE;
 static BOOL block_display_mode_change = TRUE;
 static BOOL use_original_backdrop = TRUE;
+static BOOL use_test_hook; /* [test_hook] enabled=1: honor WM_TEST_CLICK (see shim_internal.h) */
 static Backdrop backdrop; /* Optional stock bitmap/pattern, owned by the UI thread. */
 static HMENU game_menu; /* Original frame menu handle reused by the mirror. */
 static LONG windowed_style; /* Windowed mirror style before fullscreen. */
@@ -236,6 +237,29 @@ BOOL display_map_point(LPARAM mirrorPosition, POINT *framePoint)
            mirrorY >= destination_rect.top && mirrorY < destination_rect.bottom;
 }
 
+/* The reverse of display_map_point: where in the mirror does a point of the original
+* frame appear? Used by the test hook so a harness can name spots in game pixels.
+ * The point is aimed at the middle of its scaled pixel, so rounding in the forward
+ * mapping cannot move it to a neighbour. */
+static LPARAM game_point_to_mirror(int frameX, int frameY)
+{
+    int sourceWidth = source_rect.right - source_rect.left,
+        sourceHeight = source_rect.bottom - source_rect.top;
+    int destinationWidth = destination_rect.right - destination_rect.left,
+        destinationHeight = destination_rect.bottom - destination_rect.top;
+    int mirrorX, mirrorY;
+    if (refresh_src())
+        mirror_update();
+    if (sourceWidth <= 0 || sourceHeight <= 0)
+        return MAKELPARAM(0, 0);
+    /* source_rect is the game's client area measured from the frame window's top-left
+     * (the DWM thumbnail's source), so a game pixel is simply its distance from the
+     * source rectangle's own top-left corner. */
+    mirrorX = destination_rect.left + MulDiv(2 * frameX + 1, destinationWidth, 2 * sourceWidth);
+    mirrorY = destination_rect.top + MulDiv(2 * frameY + 1, destinationHeight, 2 * sourceHeight);
+    return MAKELPARAM(mirrorX, mirrorY);
+}
+
 /* Windows calls this function whenever something happens to our window. The
  * message number (WM_*) identifies the event; wParam/lParam carry event-specific
  * data. A return here means we handled that event. Unhandled events go to
@@ -367,6 +391,28 @@ static LRESULT CALLBACK mirror_window_proc(HWND mirrorWindow,
     case WM_MBUTTONUP:
     case WM_MBUTTONDBLCLK:
         return input_relay_mouse(mirrorWindow, message, wParam, lParam);
+    case WM_TEST_CLICK:
+        /* Test hook: replay a real-looking left click at the game pixel in lParam. Move,
+         * press and release are separate events, as from a mouse, with a short pause so
+         * the game sees the hover before the press. A click that opens a modal pop-up
+         * keeps running inside the release call until that pop-up closes. */
+        if (use_test_hook) {
+            LPARAM at = game_point_to_mirror(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+            POINT back;
+            BOOL inside = display_map_point(at, &back);
+            diagnostics_log("test click game=(%d,%d) mirror=(%d,%d) back=(%ld,%ld) inside=%d "
+                            "dest=(%ld,%ld,%ld,%ld) src=(%ld,%ld,%ld,%ld)",
+                            GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam), GET_X_LPARAM(at),
+                            GET_Y_LPARAM(at), back.x, back.y, (int)inside, destination_rect.left,
+                            destination_rect.top, destination_rect.right, destination_rect.bottom,
+                            source_rect.left, source_rect.top, source_rect.right, source_rect.bottom);
+            input_relay_mouse(mirrorWindow, WM_MOUSEMOVE, 0, at);
+            Sleep(60);
+            input_relay_mouse(mirrorWindow, WM_LBUTTONDOWN, MK_LBUTTON, at);
+            Sleep(60);
+            input_relay_mouse(mirrorWindow, WM_LBUTTONUP, 0, at);
+        }
+        return 0;
     case WM_MOUSELEAVE:
         input_mouse_leave();
         return 0;
@@ -776,6 +822,7 @@ void display_configure(const DisplayOptions *options)
     block_display_mode_change = options->block_mode_change;
     use_brown_titlebar = options->brown_titlebar;
     use_original_backdrop = options->original_backdrop;
+    use_test_hook = options->test_hook;
 }
 
 void display_write_diagnostics(FILE *diagnostic_file)

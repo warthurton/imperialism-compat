@@ -48,6 +48,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD notification, LPVOID reservedConte
                 GetPrivateProfileIntA("display", "brown_titlebar", 1, iniPath) != 0;
             options.original_backdrop =
                 GetPrivateProfileIntA("display", "original_backdrop", 1, iniPath) != 0;
+            options.test_hook = GetPrivateProfileIntA("test_hook", "enabled", 0, iniPath) != 0;
             display_configure(&options);
             if (GetPrivateProfileIntA("text_log", "enabled", 0, iniPath) != 0) {
                 char textPath[MAX_PATH], *textFilename;
